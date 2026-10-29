@@ -149,3 +149,63 @@ footer{
 @media (max-width:330px){
   .ctl .cmp{width:100%;padding-bottom:0}
 }
+
+/* ---------- delete button ---------- */
+.edit.del{font-size:13px}
+.edit.del:active{background:var(--danger);color:#fff;border-color:var(--danger)}
+
+/* ---------- bottom sheet menu ---------- */
+#print{display:none}
+.sheet{position:fixed;inset:0;z-index:60;pointer-events:none}
+.sheet.open{pointer-events:auto}
+.sheet-bg{
+  position:absolute;inset:0;background:rgba(0,0,0,.55);
+  opacity:0;transition:opacity .2s
+}
+.sheet.open .sheet-bg{opacity:1}
+.sheet-panel{
+  position:absolute;left:0;right:0;bottom:0;
+  max-width:720px;margin:0 auto;
+  background:var(--card);border:1px solid var(--line);
+  border-radius:20px 20px 0 0;
+  padding:8px 12px calc(14px + var(--safe-b));
+  transform:translateY(102%);transition:transform .24s cubic-bezier(.2,.8,.2,1);
+  max-height:88vh;overflow:auto
+}
+.sheet.open .sheet-panel{transform:translateY(0)}
+.sheet-grab{width:40px;height:4px;border-radius:99px;background:var(--line);margin:4px auto 12px}
+
+.mi{
+  display:flex;align-items:center;gap:12px;width:100%;
+  background:var(--card2);border:1px solid var(--line);color:var(--text);
+  border-radius:12px;padding:13px 14px;margin-bottom:8px;
+  font:inherit;font-size:15.5px;text-align:left;cursor:pointer
+}
+.mi span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mi small{font-size:11px;color:var(--muted);font-weight:400}
+.mi:active{border-color:var(--accent);background:#1f2547}
+.mi:disabled{opacity:.4}
+.mi.danger{color:#fca5a5;border-color:#3a1b1f;background:#2a1417}
+.mi.close{justify-content:center;background:transparent;color:var(--muted);margin-bottom:0}
+
+/* ---------- print ---------- */
+@media print{
+  header,footer,main,.note,.sheet,#q,.wrap > p{display:none !important}
+  body{background:#fff;color:#000;padding:0;font-size:11pt}
+  #print{display:block;padding:0 4mm}
+  #print h1{font-size:17pt;margin:0 0 2mm}
+  #print h2{font-size:13pt;margin:6mm 0 2mm;padding-bottom:1mm;border-bottom:1.5pt solid #000}
+  #print h2.brk{page-break-before:always}
+  .pmeta{font-size:9.5pt;color:#444;margin:0 0 3mm}
+  .pnone{color:#666;font-style:italic}
+  .psum{width:100%;border-collapse:collapse;margin-bottom:3mm}
+  .psum td{border:1pt solid #000;padding:2mm;text-align:center;font-size:11pt;width:33%}
+  .ptab{width:100%;border-collapse:collapse;font-size:9.5pt}
+  .ptab th,.ptab td{border:.5pt solid #777;padding:1.6mm 2mm;text-align:left;vertical-align:top}
+  .ptab thead th{background:#eee;font-size:9pt}
+  .ptab .r{text-align:right;white-space:nowrap}
+  .ptab .box{width:9mm;height:7mm}
+  .pen{font-size:8pt;color:#555}
+  .ptab tr{page-break-inside:avoid}
+  thead{display:table-header-group}
+}

@@ -20,7 +20,7 @@
       <div class="logo">🛒</div>
       <div>
         <h1>DMart खरीदी लिस्ट</h1>
-        <p>नाम पर टैप → कट · ✎ से नाम बदलो · भाव + मात्रा भरो</p>
+        <p>नाम पर टैप → कट · ✎ नाम बदलो · 🗑 हटाओ</p>
       </div>
     </div>
 
@@ -46,8 +46,9 @@
 
 <div class="wrap">
   <p class="note">
-    <b>✎</b> दबाकर नाम वहीं बदल सकते हो (जैसे "घी" → "घी — अमूल 1kg"). Enter दबाओ, सेव.<br>
-    सब कुछ इसी फ़ोन में सेव होता है (localStorage) — इंटरनेट बंद हो तो भी चलेगा.<br>
+    <b>✎</b> नाम बदलो (जैसे "घी" → "घी — अमूल 1kg") · <b>🗑</b> आइटम हटाओ.<br>
+    सब कुछ इसी फ़ोन में सेव होता है — वेबसाइट अपडेट होने पर भी डेटा नहीं मिटता.<br>
+    <b>☰ मेन्यू</b> में: एक्सपोर्ट (बैकअप), इम्पोर्ट, प्रिंट, कॉपी.<br>
     <span style="color:#f59e0b">पीला ?</span> = हैंडराइटिंग साफ़ नहीं थी, ✎ दबाकर ठीक कर लेना.
   </p>
 </div>
@@ -59,11 +60,28 @@
       <div class="v" id="total">₹0</div>
       <div class="s" id="tsub">0 आइटम बाकी</div>
     </div>
-    <button class="btn ghost" id="add">+ आइटम</button>
-    <button class="btn ghost" id="copy">📋</button>
-    <button class="btn ghost" id="reset">↺</button>
+    <button class="btn" id="menu">☰ मेन्यू</button>
   </div>
 </footer>
+
+<input type="file" id="file" accept="application/json,.json" hidden>
+
+<div id="sheet" class="sheet">
+  <div class="sheet-bg" id="sheetBg"></div>
+  <div class="sheet-panel" role="dialog" aria-label="menu">
+    <div class="sheet-grab"></div>
+    <button class="mi" id="mAdd">➕ <span>नया आइटम जोड़ो</span></button>
+    <button class="mi" id="mPrint">🖨️ <span>प्रिंट / PDF<small>लिया हुआ + बाकी, अलग-अलग</small></span></button>
+    <button class="mi" id="mExport">⬇️ <span>एक्सपोर्ट (बैकअप)<small>पूरा डेटा .json फाइल में</small></span></button>
+    <button class="mi" id="mImport">⬆️ <span>इम्पोर्ट<small>बैकअप फाइल से डेटा वापस</small></span></button>
+    <button class="mi" id="mCopy">📋 <span>टेक्स्ट कॉपी करो</span></button>
+    <button class="mi" id="mRestore">♻️ <span>हटाए हुए वापस लाओ (0)</span></button>
+    <button class="mi danger" id="mReset">⚠️ <span>सब मिटाओ (रीसेट)</span></button>
+    <button class="mi close" id="mClose">बंद करो</button>
+  </div>
+</div>
+
+<div id="print" aria-hidden="true"></div>
 
 <script src="items.js"></script>
 <script src="app.js"></script>

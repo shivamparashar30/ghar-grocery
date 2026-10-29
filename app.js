@@ -1,30 +1,55 @@
 (function () {
   "use strict";
 
-  var KEY = "dmart-list-v1";
-  var state = load();          // { done:{}, price:{}, qty:{}, name:{}, extra:[] }
+  /* ------------------------------------------------------------------
+     DATA SAFETY NOTES — read before editing
+     1. KEY must never change: existing phones hold data under it.
+     2. Item ids are "<pageId>-<index>" from items.js. NEVER reorder,
+        insert or delete entries in items.js — ids would shift and every
+        saved price/qty would attach to the wrong item. Append only,
+        at the END of a page's array.
+     3. load() must tolerate older saved shapes (missing fields).
+     4. A rolling backup is kept under BKEY before each write.
+     ------------------------------------------------------------------ */
+  var KEY  = "dmart-list-v1";
+  var BKEY = "dmart-list-v1-backup";
+
+  var state = load();   // { done, price, qty, name, extra, removed }
   var filter = "all";
   var query = "";
 
+  function blank() {
+    return { done: {}, price: {}, qty: {}, name: {}, extra: [], removed: {} };
+  }
+
   function load() {
+    var s = blank();
     try {
       var raw = localStorage.getItem(KEY);
-      if (raw) {
-        var s = JSON.parse(raw);
-        s.done  = s.done  || {}; s.price = s.price || {};
-        s.qty   = s.qty   || {}; s.name  = s.name  || {};
-        s.extra = s.extra || [];
-        return s;
-      }
-    } catch (e) { /* private mode / blocked storage */ }
-    return { done: {}, price: {}, qty: {}, name: {}, extra: [] };
+      if (!raw) return s;
+      var p = JSON.parse(raw);
+      if (!p || typeof p !== "object") return s;
+      s.done    = p.done    && typeof p.done    === "object" ? p.done    : {};
+      s.price   = p.price   && typeof p.price   === "object" ? p.price   : {};
+      s.qty     = p.qty     && typeof p.qty     === "object" ? p.qty     : {};
+      s.name    = p.name    && typeof p.name    === "object" ? p.name    : {};
+      s.removed = p.removed && typeof p.removed === "object" ? p.removed : {};
+      s.extra   = Array.isArray(p.extra) ? p.extra.filter(function (e) {
+        return e && e.id && typeof e.hi === "string";
+      }) : [];
+    } catch (e) { /* corrupt or blocked storage -> start clean, don't crash */ }
+    return s;
   }
 
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+    try {
+      var prev = localStorage.getItem(KEY);
+      if (prev) localStorage.setItem(BKEY, prev);   // rolling one-step backup
+      localStorage.setItem(KEY, JSON.stringify(state));
+    } catch (e) {}
   }
 
-  // ---- flat model with stable ids ---------------------------------------
+  // ---- model -------------------------------------------------------------
   var model = [];
   PAGES.forEach(function (p) {
     model.push({
@@ -46,13 +71,18 @@
   syncExtra();
 
   function nameOf(it) { return state.name[it.id] != null ? state.name[it.id] : it.hi; }
-  function allItems() { return model.reduce(function (a, g) { return a.concat(g.items); }, []); }
+  function live(g) { return g.items.filter(function (i) { return !state.removed[i.id]; }); }
+  function allItems() {
+    return model.reduce(function (a, g) { return a.concat(live(g)); }, []);
+  }
   function newPrice(it) { var v = parseFloat(state.price[it.id]); return isNaN(v) ? null : v; }
+  function tookQty(it) { return state.qty[it.id] || ""; }
 
-  // ---- render -----------------------------------------------------------
+  // ---- render ------------------------------------------------------------
   var listEl = document.getElementById("list");
 
   function matches(it) {
+    if (state.removed[it.id]) return false;
     var done = !!state.done[it.id];
     if (filter === "todo" && done) return false;
     if (filter === "done" && !done) return false;
@@ -68,10 +98,10 @@
     var shown = 0;
 
     model.forEach(function (g) {
-      if (!g.items.length) return;
       var vis = g.items.filter(matches);
       if (!vis.length) return;
       shown += vis.length;
+      var lv = live(g);
 
       var h = document.createElement("div");
       h.className = "grp";
@@ -79,7 +109,7 @@
       h.querySelector("h2").textContent = g.title;
       h.querySelector("small").textContent = g.sub;
       h.querySelector(".cnt").textContent =
-        g.items.filter(function (i) { return state.done[i.id]; }).length + "/" + g.items.length;
+        lv.filter(function (i) { return state.done[i.id]; }).length + "/" + lv.length;
       listEl.appendChild(h);
 
       var ul = document.createElement("ul");
@@ -101,7 +131,6 @@
     li.className = "row" + (state.done[it.id] ? " done" : "");
     li.dataset.id = it.id;
 
-    // tick -------------------------------------------------------------
     var tick = document.createElement("button");
     tick.className = "tick"; tick.textContent = "✓";
     tick.setAttribute("aria-label", "mark bought");
@@ -109,7 +138,6 @@
     var body = document.createElement("div");
     body.className = "body";
 
-    // name line --------------------------------------------------------
     var top = document.createElement("div");
     top.className = "top";
 
@@ -118,32 +146,38 @@
 
     var nm = document.createElement("div");
     nm.className = "nm";
-    nm.textContent = nameOf(it);
-    if (it.u) {
-      var qm = document.createElement("span");
-      qm.className = "q"; qm.textContent = "?";
-      qm.title = "handwriting unclear — verify";
-      nm.appendChild(qm);
+    setName();
+    function setName() {
+      nm.textContent = nameOf(it);
+      if (it.u) {
+        var qm = document.createElement("span");
+        qm.className = "q"; qm.textContent = "?";
+        nm.appendChild(qm);
+      }
     }
     tapzone.appendChild(nm);
 
-    var meta = document.createElement("div");
-    meta.className = "meta";
     var bits = [];
     if (it.en) bits.push(it.en);
     if (it.qty) bits.push("लिस्ट: " + it.qty);
-    meta.textContent = bits.join("  ·  ");
-    if (bits.length) tapzone.appendChild(meta);
+    if (bits.length) {
+      var meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = bits.join("  ·  ");
+      tapzone.appendChild(meta);
+    }
 
     var ed = document.createElement("button");
     ed.className = "edit"; ed.textContent = "✎";
     ed.setAttribute("aria-label", "edit name");
 
-    top.appendChild(tapzone);
-    top.appendChild(ed);
+    var del = document.createElement("button");
+    del.className = "edit del"; del.textContent = "🗑";
+    del.setAttribute("aria-label", "delete item");
+
+    top.appendChild(tapzone); top.appendChild(ed); top.appendChild(del);
     body.appendChild(top);
 
-    // controls line ----------------------------------------------------
     var ctl = document.createElement("div");
     ctl.className = "ctl";
 
@@ -153,8 +187,7 @@
     var qIn = document.createElement("input");
     qIn.type = "text"; qIn.className = "inp qty";
     qIn.placeholder = it.qty || "qty";
-    qIn.value = state.qty[it.id] != null ? state.qty[it.id] : "";
-    qIn.setAttribute("aria-label", "quantity taken for " + nameOf(it));
+    qIn.value = tookQty(it);
     qWrap.appendChild(qIn);
 
     var pWrap = document.createElement("label");
@@ -164,47 +197,36 @@
     pIn.type = "text"; pIn.className = "inp price";
     pIn.inputMode = "decimal"; pIn.placeholder = "0";
     pIn.value = state.price[it.id] != null ? state.price[it.id] : "";
-    pIn.setAttribute("aria-label", "new price for " + nameOf(it));
     pWrap.appendChild(pIn);
 
     var cmp = document.createElement("div");
     cmp.className = "cmp";
 
-    ctl.appendChild(qWrap);
-    ctl.appendChild(pWrap);
-    ctl.appendChild(cmp);
+    ctl.appendChild(qWrap); ctl.appendChild(pWrap); ctl.appendChild(cmp);
     body.appendChild(ctl);
 
-    li.appendChild(tick);
-    li.appendChild(body);
+    li.appendChild(tick); li.appendChild(body);
 
-    // old vs new -------------------------------------------------------
     function paintCmp() {
       cmp.innerHTML = "";
+      var np = newPrice(it);
       if (it.est == null) {
-        var np0 = newPrice(it);
-        if (np0 != null) cmp.innerHTML = '<span class="chip neu">नया ₹' + fmt(np0) + "</span>";
+        if (np != null) cmp.innerHTML = '<span class="chip neu">नया ₹' + fmt(np) + "</span>";
         return;
       }
       var old = document.createElement("span");
-      old.className = "chip old";
-      old.textContent = "पुराना ₹" + fmt(it.est);
+      old.className = "chip old"; old.textContent = "पुराना ₹" + fmt(it.est);
       cmp.appendChild(old);
-
-      var np = newPrice(it);
       if (np == null) return;
-
       var d = np - it.est;
       var chip = document.createElement("span");
       chip.className = "chip " + (d > 0 ? "up" : d < 0 ? "down" : "same");
       chip.textContent = d > 0 ? "▲ ₹" + fmt(d) + " ज़्यादा"
-                       : d < 0 ? "▼ ₹" + fmt(-d) + " बचा"
-                               : "= बराबर";
+                       : d < 0 ? "▼ ₹" + fmt(-d) + " बचा" : "= बराबर";
       cmp.appendChild(chip);
     }
     paintCmp();
 
-    // interactions -----------------------------------------------------
     function toggle() {
       if (state.done[it.id]) delete state.done[it.id]; else state.done[it.id] = 1;
       save();
@@ -214,23 +236,19 @@
     }
     tick.addEventListener("click", toggle);
     tapzone.addEventListener("click", function () {
-      if (li.classList.contains("editing")) return;
-      toggle();
+      if (!li.classList.contains("editing")) toggle();
     });
 
     qIn.addEventListener("input", function () {
-      var v = qIn.value;
-      if (v === "") delete state.qty[it.id]; else state.qty[it.id] = v;
+      if (qIn.value === "") delete state.qty[it.id]; else state.qty[it.id] = qIn.value;
       save();
     });
-
     pIn.addEventListener("input", function () {
       var v = pIn.value.replace(/[^0-9.]/g, "");
       if (v !== pIn.value) pIn.value = v;
       if (v === "") delete state.price[it.id]; else state.price[it.id] = v;
       save(); paintCmp(); updateStats();
     });
-
     [qIn, pIn].forEach(function (el) {
       el.addEventListener("keydown", function (ev) {
         if (ev.key !== "Enter") return;
@@ -239,18 +257,14 @@
       });
     });
 
-    // inline rename ----------------------------------------------------
     ed.addEventListener("click", function () {
       if (li.classList.contains("editing")) return;
       li.classList.add("editing");
-
       var inp = document.createElement("input");
       inp.type = "text"; inp.className = "inp rename";
       inp.value = nameOf(it);
-      inp.setAttribute("aria-label", "item name");
       nm.replaceWith(inp);
-      inp.focus();
-      inp.setSelectionRange(inp.value.length, inp.value.length);
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
 
       var closed = false;
       function commit(keep) {
@@ -263,16 +277,25 @@
           }
           save();
         }
-        nm.firstChild ? (nm.childNodes[0].nodeValue = nameOf(it)) : (nm.textContent = nameOf(it));
+        setName();
         inp.replaceWith(nm);
         li.classList.remove("editing");
-        pIn.setAttribute("aria-label", "new price for " + nameOf(it));
       }
       inp.addEventListener("keydown", function (ev) {
         if (ev.key === "Enter") { ev.preventDefault(); commit(true); }
-        if (ev.key === "Escape") { commit(false); }
+        if (ev.key === "Escape") commit(false);
       });
       inp.addEventListener("blur", function () { commit(true); });
+    });
+
+    del.addEventListener("click", function () {
+      if (!confirm('"' + nameOf(it) + '" हटा दें?\n\n(मेन्यू → "हटाए हुए वापस लाओ" से वापस आ सकता है)')) return;
+      if (it.page === "extra") {
+        state.extra = state.extra.filter(function (e) { return e.id !== it.id; });
+        syncExtra();
+      }
+      state.removed[it.id] = 1;
+      save(); render();
     });
 
     return li;
@@ -282,40 +305,47 @@
     var heads = listEl.querySelectorAll(".grp");
     var i = 0;
     model.forEach(function (g) {
-      if (!g.items.length || !g.items.filter(matches).length) return;
+      if (!g.items.filter(matches).length) return;
       var el = heads[i++]; if (!el) return;
+      var lv = live(g);
       el.querySelector(".cnt").textContent =
-        g.items.filter(function (x) { return state.done[x.id]; }).length + "/" + g.items.length;
+        lv.filter(function (x) { return state.done[x.id]; }).length + "/" + lv.length;
     });
   }
 
   // ---- stats -------------------------------------------------------------
-  function updateStats() {
+  function totals() {
     var items = allItems();
-    var total = items.length;
-    var done  = items.filter(function (i) { return state.done[i.id]; }).length;
-
     var spent = 0, oldSum = 0;
     items.forEach(function (i) {
       var np = newPrice(i);
       if (np == null) return;
       spent += np;
-      if (i.est != null) oldSum += i.est;      // compare only what's been priced
+      if (i.est != null) oldSum += i.est;
     });
-    var diff = spent - oldSum;
+    return {
+      items: items,
+      total: items.length,
+      done: items.filter(function (i) { return state.done[i.id]; }).length,
+      spent: spent, oldSum: oldSum, diff: spent - oldSum
+    };
+  }
 
-    document.getElementById("sDone").textContent = done + "/" + total;
-    document.getElementById("sOld").textContent  = "₹" + fmt(oldSum);
-
+  function updateStats() {
+    var t = totals();
+    document.getElementById("sDone").textContent = t.done + "/" + t.total;
+    document.getElementById("sOld").textContent  = "₹" + fmt(t.oldSum);
     var dEl = document.getElementById("sDiff");
-    dEl.textContent = (diff > 0 ? "+₹" : diff < 0 ? "−₹" : "₹") + fmt(Math.abs(diff));
-    dEl.className = "v " + (diff > 0 ? "red" : diff < 0 ? "green" : "ind");
-
-    document.getElementById("total").textContent = "₹" + fmt(spent);
+    dEl.textContent = (t.diff > 0 ? "+₹" : t.diff < 0 ? "−₹" : "₹") + fmt(Math.abs(t.diff));
+    dEl.className = "v " + (t.diff > 0 ? "red" : t.diff < 0 ? "green" : "ind");
+    document.getElementById("total").textContent = "₹" + fmt(t.spent);
     document.getElementById("tsub").textContent =
-      oldSum ? "पुराना ₹" + fmt(oldSum) + "  ·  " + (total - done) + " बाकी"
-             : (total - done) + " आइटम बाकी";
-    document.getElementById("bar").style.width = total ? (done / total * 100) + "%" : "0%";
+      (t.oldSum ? "पुराना ₹" + fmt(t.oldSum) + "  ·  " : "") + (t.total - t.done) + " बाकी";
+    document.getElementById("bar").style.width = t.total ? (t.done / t.total * 100) + "%" : "0%";
+    var rc = Object.keys(state.removed).length;
+    var rb = document.getElementById("mRestore");
+    rb.textContent = "♻️ हटाए हुए वापस लाओ (" + rc + ")";
+    rb.disabled = !rc;
   }
 
   function fmt(n) {
@@ -323,70 +353,238 @@
     return n.toLocaleString("en-IN");
   }
 
-  // ---- toolbar -----------------------------------------------------------
+  // ---- filters / search --------------------------------------------------
   document.querySelectorAll(".seg button").forEach(function (b) {
     b.addEventListener("click", function () {
       document.querySelectorAll(".seg button").forEach(function (x) { x.classList.remove("on"); });
       b.classList.add("on");
-      filter = b.dataset.f;
-      render();
+      filter = b.dataset.f; render();
     });
   });
-
   var qEl = document.getElementById("q");
   qEl.addEventListener("input", function () {
-    query = qEl.value.trim().toLowerCase();
-    render();
+    query = qEl.value.trim().toLowerCase(); render();
   });
 
-  document.getElementById("add").addEventListener("click", function () {
+  // ---- menu sheet --------------------------------------------------------
+  var sheet = document.getElementById("sheet");
+  function openSheet(v) { sheet.classList.toggle("open", v); }
+  document.getElementById("menu").addEventListener("click", function () { openSheet(true); });
+  document.getElementById("sheetBg").addEventListener("click", function () { openSheet(false); });
+  document.getElementById("mClose").addEventListener("click", function () { openSheet(false); });
+
+  // add item
+  document.getElementById("mAdd").addEventListener("click", function () {
+    openSheet(false);
     var n = prompt("नया आइटम का नाम:");
     if (!n || !n.trim()) return;
-    state.extra.push({ id: "x-" + Date.now(), hi: n.trim(), qty: "" });
+    var q = prompt("कितना? (खाली छोड़ सकते हो)", "") || "";
+    var id = "x-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+    state.extra.push({ id: id, hi: n.trim(), qty: q.trim() });
     save(); syncExtra(); render();
-    var el = listEl.querySelector('[data-id="' + state.extra[state.extra.length - 1].id + '"]');
+    var el = listEl.querySelector('[data-id="' + id + '"]');
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   });
 
-  document.getElementById("copy").addEventListener("click", function () {
-    var lines = [], spent = 0, oldSum = 0;
+  // restore deleted
+  document.getElementById("mRestore").addEventListener("click", function () {
+    var n = Object.keys(state.removed).length;
+    if (!n) return;
+    if (!confirm(n + " हटाए हुए आइटम वापस लाएँ?\n(जो आइटम आपने खुद जोड़े थे वो वापस नहीं आएँगे)")) return;
+    state.removed = {};
+    save(); render(); openSheet(false);
+  });
+
+  // ---- export ------------------------------------------------------------
+  function stamp() {
+    var d = new Date(), p = function (x) { return (x < 10 ? "0" : "") + x; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+           "_" + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  function download(name, text, type) {
+    try {
+      var blob = new Blob([text], { type: type || "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  document.getElementById("mExport").addEventListener("click", function () {
+    var payload = {
+      app: "dmart-list", version: 1,
+      exportedAt: new Date().toISOString(),
+      itemCount: allItems().length,
+      data: state
+    };
+    var txt = JSON.stringify(payload, null, 2);
+    if (!download("dmart-list-backup_" + stamp() + ".json", txt)) {
+      prompt("कॉपी कर लो (backup):", txt);
+    }
+    openSheet(false);
+  });
+
+  // ---- import ------------------------------------------------------------
+  var fileIn = document.getElementById("file");
+  document.getElementById("mImport").addEventListener("click", function () {
+    openSheet(false); fileIn.value = ""; fileIn.click();
+  });
+
+  fileIn.addEventListener("change", function () {
+    var f = fileIn.files && fileIn.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      var p;
+      try { p = JSON.parse(String(r.result)); }
+      catch (e) { alert("❌ फाइल पढ़ी नहीं गई — सही JSON बैकअप चुनो."); return; }
+
+      var d = (p && p.data) ? p.data : p;
+      if (!d || typeof d !== "object" || (!d.price && !d.done && !d.qty && !d.extra)) {
+        alert("❌ ये इस ऐप का बैकअप नहीं लगता."); return;
+      }
+
+      var nP = Object.keys(d.price || {}).length,
+          nD = Object.keys(d.done  || {}).length,
+          nQ = Object.keys(d.qty   || {}).length,
+          nX = (d.extra || []).length;
+
+      if (!confirm("इम्पोर्ट करें?\n\n" + nD + " टिक · " + nP + " भाव · " +
+                   nQ + " मात्रा · " + nX + " जोड़े हुए आइटम\n\n" +
+                   "ये आपके मौजूदा डेटा में मिला दिया जाएगा (merge).\n" +
+                   "पुराना डेटा बैकअप में रहेगा.")) return;
+
+      try { localStorage.setItem(BKEY, JSON.stringify(state)); } catch (e) {}
+
+      ["done", "price", "qty", "name", "removed"].forEach(function (k) {
+        var src = d[k];
+        if (!src || typeof src !== "object") return;
+        Object.keys(src).forEach(function (id) { state[k][id] = src[id]; });
+      });
+      if (Array.isArray(d.extra)) {
+        var have = {};
+        state.extra.forEach(function (e) { have[e.id] = 1; });
+        d.extra.forEach(function (e) {
+          if (e && e.id && typeof e.hi === "string" && !have[e.id]) state.extra.push(e);
+        });
+      }
+      save(); syncExtra(); render();
+      alert("✅ इम्पोर्ट हो गया.");
+    };
+    r.onerror = function () { alert("❌ फाइल नहीं खुली."); };
+    r.readAsText(f);
+  });
+
+  // ---- copy as text ------------------------------------------------------
+  document.getElementById("mCopy").addEventListener("click", function () {
+    var txt = asText();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { alert("📋 कॉपी हो गया."); },
+                                              function () { prompt("कॉपी करो:", txt); });
+    } else prompt("कॉपी करो:", txt);
+    openSheet(false);
+  });
+
+  function asText() {
+    var t = totals(), lines = [];
+    lines.push("DMart लिस्ट — " + new Date().toLocaleDateString("en-IN"));
+    lines.push("");
     model.forEach(function (g) {
-      if (!g.items.length) return;
+      var lv = live(g); if (!lv.length) return;
       lines.push("— " + g.title + " —");
-      g.items.forEach(function (i) {
-        var np = newPrice(i);
-        if (np != null) { spent += np; if (i.est != null) oldSum += i.est; }
-        var parts = [(state.done[i.id] ? "[x] " : "[ ] ") + nameOf(i)];
-        var took = state.qty[i.id] || i.qty;
-        if (took) parts.push(took);
+      lv.forEach(function (i) {
+        var np = newPrice(i), parts = [(state.done[i.id] ? "[x] " : "[ ] ") + nameOf(i)];
+        var q = tookQty(i) || i.qty;
+        if (q) parts.push(q);
         if (np != null) parts.push("₹" + np + (i.est != null ? " (पुराना ₹" + i.est + ")" : ""));
         lines.push(parts.join(" — "));
       });
       lines.push("");
     });
-    lines.push("कुल खर्च: ₹" + fmt(spent));
-    if (oldSum) lines.push("पुराना अंदाज़: ₹" + fmt(oldSum) + "  ·  अंतर: " +
-      (spent - oldSum >= 0 ? "+" : "−") + "₹" + fmt(Math.abs(spent - oldSum)));
-    var txt = lines.join("\n");
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(flash, function () { fallback(txt); });
-    } else fallback(txt);
+    lines.push("लिया: " + t.done + "/" + t.total + "   बाकी: " + (t.total - t.done));
+    lines.push("नया कुल: ₹" + fmt(t.spent));
+    if (t.oldSum) lines.push("पुराना: ₹" + fmt(t.oldSum) + "   अंतर: " +
+      (t.diff >= 0 ? "+" : "−") + "₹" + fmt(Math.abs(t.diff)));
+    return lines.join("\n");
+  }
+
+  // ---- print -------------------------------------------------------------
+  document.getElementById("mPrint").addEventListener("click", function () {
+    buildPrint(); openSheet(false);
+    setTimeout(function () { window.print(); }, 120);
   });
 
-  function fallback(txt) {
-    var t = document.createElement("textarea");
-    t.value = txt; document.body.appendChild(t); t.select();
-    try { document.execCommand("copy"); flash(); } catch (e) { alert(txt); }
-    document.body.removeChild(t);
-  }
-  function flash() {
-    var b = document.getElementById("copy"), old = b.textContent;
-    b.textContent = "✓";
-    setTimeout(function () { b.textContent = old; }, 1200);
+  function buildPrint() {
+    var t = totals();
+    var done = [], left = [];
+    model.forEach(function (g) {
+      live(g).forEach(function (i) {
+        (state.done[i.id] ? done : left).push({ g: g, i: i });
+      });
+    });
+
+    var h = [];
+    h.push('<h1>DMart खरीदी लिस्ट</h1>');
+    h.push('<p class="pmeta">' + new Date().toLocaleString("en-IN") +
+           '  ·  लिया ' + t.done + '/' + t.total + '  ·  बाकी ' + (t.total - t.done) + '</p>');
+
+    h.push('<table class="psum"><tr>' +
+           '<td><b>नया कुल खर्च</b><br>₹' + fmt(t.spent) + '</td>' +
+           '<td><b>पुराना अंदाज़</b><br>₹' + fmt(t.oldSum) + '</td>' +
+           '<td><b>अंतर</b><br>' + (t.diff >= 0 ? "+" : "−") + '₹' + fmt(Math.abs(t.diff)) + '</td>' +
+           '</tr></table>');
+
+    h.push('<h2>✓ लिया हुआ — ' + done.length + ' आइटम</h2>');
+    h.push(table(done, true));
+
+    h.push('<h2 class="brk">☐ बाकी — ' + left.length + ' आइटम</h2>');
+    h.push(table(left, false));
+
+    document.getElementById("print").innerHTML = h.join("");
   }
 
-  document.getElementById("reset").addEventListener("click", function () {
-    if (!confirm("सब टिक, भाव और मात्रा मिटा दें?\n(नाम के बदलाव और जोड़े हुए आइटम रहेंगे)")) return;
+  function table(rows, withPrice) {
+    if (!rows.length) return '<p class="pnone">— कुछ नहीं —</p>';
+    var h = ['<table class="ptab"><thead><tr><th>#</th><th>आइटम</th><th>पेज</th><th>मात्रा</th>'];
+    h.push(withPrice ? '<th class="r">पुराना</th><th class="r">नया</th><th class="r">अंतर</th>'
+                     : '<th class="r">पुराना भाव</th><th>✓</th>');
+    h.push('</tr></thead><tbody>');
+    rows.forEach(function (r, n) {
+      var i = r.i, np = newPrice(i);
+      h.push('<tr><td>' + (n + 1) + '</td><td><b>' + esc(nameOf(i)) + '</b>' +
+             (i.en ? '<br><span class="pen">' + esc(i.en) + '</span>' : '') + '</td>' +
+             '<td>' + esc(r.g.title) + '</td>' +
+             '<td>' + esc(withPrice ? (tookQty(i) || i.qty || "—") : (i.qty || "—")) + '</td>');
+      if (withPrice) {
+        var d = (np != null && i.est != null) ? np - i.est : null;
+        h.push('<td class="r">' + (i.est != null ? "₹" + fmt(i.est) : "—") + '</td>' +
+               '<td class="r"><b>' + (np != null ? "₹" + fmt(np) : "—") + '</b></td>' +
+               '<td class="r">' + (d == null ? "—" : (d > 0 ? "+" : d < 0 ? "−" : "") + "₹" + fmt(Math.abs(d))) + '</td>');
+      } else {
+        h.push('<td class="r">' + (i.est != null ? "₹" + fmt(i.est) : "—") + '</td><td class="box"></td>');
+      }
+      h.push('</tr>');
+    });
+    return h.join("") + '</tbody></table>';
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  // ---- reset (guarded) ---------------------------------------------------
+  document.getElementById("mReset").addEventListener("click", function () {
+    openSheet(false);
+    if (!confirm("⚠️ सब टिक, भाव और मात्रा मिट जाएँगे.\n\nपहले मेन्यू → एक्सपोर्ट से बैकअप ले लो!\n\nआगे बढ़ें?")) return;
+    if (prompt('पक्का? नीचे "DELETE" लिखो:') !== "DELETE") { alert("रुक गया — कुछ नहीं मिटा."); return; }
+    try { localStorage.setItem(BKEY, JSON.stringify(state)); } catch (e) {}
     state.done = {}; state.price = {}; state.qty = {};
     save(); render();
   });
