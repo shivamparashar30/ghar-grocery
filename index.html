@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<meta name="theme-color" content="#0b0d17">
+<meta name="description" content="DMart grocery list — tap to strike off, enter price, saved on this phone.">
+<title>DMart List</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="hd">
+      <div class="logo">🛒</div>
+      <div>
+        <h1>DMart खरीदी लिस्ट</h1>
+        <p>नाम पर टैप → कट · ✎ से नाम बदलो · भाव + मात्रा भरो</p>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">हो गया</div><div class="v green" id="sDone">0/0</div></div>
+      <div class="stat"><div class="k">पुराना कुल</div><div class="v" id="sOld">₹0</div></div>
+      <div class="stat"><div class="k">अंतर</div><div class="v ind" id="sDiff">₹0</div></div>
+    </div>
+    <div class="bar"><span id="bar"></span></div>
+
+    <div class="tools">
+      <input type="search" id="q" placeholder="आइटम ढूंढो… (search)" autocomplete="off">
+      <div class="seg">
+        <button data-f="all" class="on">सब</button>
+        <button data-f="todo">बाकी</button>
+        <button data-f="done">हो गया</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="list"></main>
+
+<div class="wrap">
+  <p class="note">
+    <b>✎</b> दबाकर नाम वहीं बदल सकते हो (जैसे "घी" → "घी — अमूल 1kg"). Enter दबाओ, सेव.<br>
+    सब कुछ इसी फ़ोन में सेव होता है (localStorage) — इंटरनेट बंद हो तो भी चलेगा.<br>
+    <span style="color:#f59e0b">पीला ?</span> = हैंडराइटिंग साफ़ नहीं थी, ✎ दबाकर ठीक कर लेना.
+  </p>
+</div>
+
+<footer>
+  <div class="wrap ft">
+    <div class="tot">
+      <div class="k">नया कुल खर्च</div>
+      <div class="v" id="total">₹0</div>
+      <div class="s" id="tsub">0 आइटम बाकी</div>
+    </div>
+    <button class="btn ghost" id="add">+ आइटम</button>
+    <button class="btn ghost" id="copy">📋</button>
+    <button class="btn ghost" id="reset">↺</button>
+  </div>
+</footer>
+
+<script src="items.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
