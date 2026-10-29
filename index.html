@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="hi">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
@@ -19,24 +19,24 @@
     <div class="hd">
       <div class="logo">🛒</div>
       <div>
-        <h1>DMart खरीदी लिस्ट</h1>
-        <p>नाम पर टैप → कट · ✎ नाम बदलो · 🗑 हटाओ</p>
+        <h1>DMart Shopping List</h1>
+        <p>Tap a name to strike it off · ✎ edit · 🗑 delete</p>
       </div>
     </div>
 
     <div class="stats">
-      <div class="stat"><div class="k">हो गया</div><div class="v green" id="sDone">0/0</div></div>
-      <div class="stat"><div class="k">पुराना कुल</div><div class="v" id="sOld">₹0</div></div>
-      <div class="stat"><div class="k">अंतर</div><div class="v ind" id="sDiff">₹0</div></div>
+      <div class="stat"><div class="k">Done</div><div class="v green" id="sDone">0/0</div></div>
+      <div class="stat"><div class="k">Old total</div><div class="v" id="sOld">₹0</div></div>
+      <div class="stat"><div class="k">Difference</div><div class="v ind" id="sDiff">₹0</div></div>
     </div>
     <div class="bar"><span id="bar"></span></div>
 
     <div class="tools">
-      <input type="search" id="q" placeholder="आइटम ढूंढो… (search)" autocomplete="off">
+      <input type="search" id="q" placeholder="Search items…" autocomplete="off">
       <div class="seg">
-        <button data-f="all" class="on">सब</button>
-        <button data-f="todo">बाकी</button>
-        <button data-f="done">हो गया</button>
+        <button data-f="all" class="on">All</button>
+        <button data-f="todo">Left</button>
+        <button data-f="done">Done</button>
       </div>
     </div>
   </div>
@@ -46,21 +46,20 @@
 
 <div class="wrap">
   <p class="note">
-    <b>✎</b> नाम बदलो (जैसे "घी" → "घी — अमूल 1kg") · <b>🗑</b> आइटम हटाओ.<br>
-    सब कुछ इसी फ़ोन में सेव होता है — वेबसाइट अपडेट होने पर भी डेटा नहीं मिटता.<br>
-    <b>☰ मेन्यू</b> में: एक्सपोर्ट (बैकअप), इम्पोर्ट, प्रिंट, कॉपी.<br>
-    <span style="color:#f59e0b">पीला ?</span> = हैंडराइटिंग साफ़ नहीं थी, ✎ दबाकर ठीक कर लेना.
+<b>✎</b> rename an item (e.g. "घी" → "घी — Amul 1kg") · <b>🗑</b> delete it.<br>
+    Everything is saved on this phone — site updates never wipe your data.<br>
+    <b>☰ Menu</b> has: Export (backup), Import, Print, Copy.<br>
   </p>
 </div>
 
 <footer>
   <div class="wrap ft">
     <div class="tot">
-      <div class="k">नया कुल खर्च</div>
+      <div class="k">New total spent</div>
       <div class="v" id="total">₹0</div>
-      <div class="s" id="tsub">0 आइटम बाकी</div>
+      <div class="s" id="tsub">0 left</div>
     </div>
-    <button class="btn" id="menu">☰ मेन्यू</button>
+    <button class="btn" id="menu">☰ Menu</button>
   </div>
 </footer>
 
@@ -70,14 +69,14 @@
   <div class="sheet-bg" id="sheetBg"></div>
   <div class="sheet-panel" role="dialog" aria-label="menu">
     <div class="sheet-grab"></div>
-    <button class="mi" id="mAdd">➕ <span>नया आइटम जोड़ो</span></button>
-    <button class="mi" id="mPrint">🖨️ <span>प्रिंट / PDF<small>लिया हुआ + बाकी, अलग-अलग</small></span></button>
-    <button class="mi" id="mExport">⬇️ <span>एक्सपोर्ट (बैकअप)<small>पूरा डेटा .json फाइल में</small></span></button>
-    <button class="mi" id="mImport">⬆️ <span>इम्पोर्ट<small>बैकअप फाइल से डेटा वापस</small></span></button>
-    <button class="mi" id="mCopy">📋 <span>टेक्स्ट कॉपी करो</span></button>
-    <button class="mi" id="mRestore">♻️ <span>हटाए हुए वापस लाओ (0)</span></button>
-    <button class="mi danger" id="mReset">⚠️ <span>सब मिटाओ (रीसेट)</span></button>
-    <button class="mi close" id="mClose">बंद करो</button>
+    <button class="mi" id="mAdd">➕ <span>Add new item</span></button>
+    <button class="mi" id="mPrint">🖨️ <span>Print / PDF<small>Bought and remaining, separate pages</small></span></button>
+    <button class="mi" id="mExport">⬇️ <span>Export (backup)<small>All your data as a .json file</small></span></button>
+    <button class="mi" id="mImport">⬆️ <span>Import<small>Restore data from a backup file</small></span></button>
+    <button class="mi" id="mCopy">📋 <span>Copy as text</span></button>
+    <button class="mi" id="mRestore">♻️ <span>Restore deleted (0)</span></button>
+    <button class="mi danger" id="mReset">⚠️ <span>Erase everything (reset)</span></button>
+    <button class="mi close" id="mClose">Close</button>
   </div>
 </div>
 

@@ -60,7 +60,7 @@
       })
     });
   });
-  var EXTRA = { id: "extra", title: "मेरे जोड़े हुए", sub: "extra items", items: [] };
+  var EXTRA = { id: "extra", title: "My Added Items", sub: "added by me", items: [] };
   model.push(EXTRA);
 
   function syncExtra() {
@@ -120,7 +120,7 @@
     if (!shown) {
       var e = document.createElement("div");
       e.className = "empty";
-      e.textContent = query ? "कुछ नहीं मिला 🤷" : "यहाँ कुछ नहीं है";
+      e.textContent = query ? "No match 🤷" : "Nothing here";
       listEl.appendChild(e);
     }
     updateStats();
@@ -159,7 +159,7 @@
 
     var bits = [];
     if (it.en) bits.push(it.en);
-    if (it.qty) bits.push("लिस्ट: " + it.qty);
+    if (it.qty) bits.push("List: " + it.qty);
     if (bits.length) {
       var meta = document.createElement("div");
       meta.className = "meta";
@@ -183,7 +183,7 @@
 
     var qWrap = document.createElement("label");
     qWrap.className = "fld";
-    qWrap.innerHTML = '<span class="lbl">कितना लिया</span>';
+    qWrap.innerHTML = '<span class="lbl">Qty taken</span>';
     var qIn = document.createElement("input");
     qIn.type = "text"; qIn.className = "inp qty";
     qIn.placeholder = it.qty || "qty";
@@ -192,7 +192,7 @@
 
     var pWrap = document.createElement("label");
     pWrap.className = "fld";
-    pWrap.innerHTML = '<span class="lbl">नया भाव ₹</span>';
+    pWrap.innerHTML = '<span class="lbl">New price ₹</span>';
     var pIn = document.createElement("input");
     pIn.type = "text"; pIn.className = "inp price";
     pIn.inputMode = "decimal"; pIn.placeholder = "0";
@@ -211,18 +211,18 @@
       cmp.innerHTML = "";
       var np = newPrice(it);
       if (it.est == null) {
-        if (np != null) cmp.innerHTML = '<span class="chip neu">नया ₹' + fmt(np) + "</span>";
+        if (np != null) cmp.innerHTML = '<span class="chip neu">New ₹' + fmt(np) + "</span>";
         return;
       }
       var old = document.createElement("span");
-      old.className = "chip old"; old.textContent = "पुराना ₹" + fmt(it.est);
+      old.className = "chip old"; old.textContent = "Old ₹" + fmt(it.est);
       cmp.appendChild(old);
       if (np == null) return;
       var d = np - it.est;
       var chip = document.createElement("span");
       chip.className = "chip " + (d > 0 ? "up" : d < 0 ? "down" : "same");
-      chip.textContent = d > 0 ? "▲ ₹" + fmt(d) + " ज़्यादा"
-                       : d < 0 ? "▼ ₹" + fmt(-d) + " बचा" : "= बराबर";
+      chip.textContent = d > 0 ? "▲ ₹" + fmt(d) + " more"
+                       : d < 0 ? "▼ ₹" + fmt(-d) + " saved" : "= same";
       cmp.appendChild(chip);
     }
     paintCmp();
@@ -289,7 +289,7 @@
     });
 
     del.addEventListener("click", function () {
-      if (!confirm('"' + nameOf(it) + '" हटा दें?\n\n(मेन्यू → "हटाए हुए वापस लाओ" से वापस आ सकता है)')) return;
+      if (!confirm('Delete "' + nameOf(it) + '"?\n\n(You can bring it back from Menu -> Restore deleted)')) return;
       if (it.page === "extra") {
         state.extra = state.extra.filter(function (e) { return e.id !== it.id; });
         syncExtra();
@@ -340,11 +340,11 @@
     dEl.className = "v " + (t.diff > 0 ? "red" : t.diff < 0 ? "green" : "ind");
     document.getElementById("total").textContent = "₹" + fmt(t.spent);
     document.getElementById("tsub").textContent =
-      (t.oldSum ? "पुराना ₹" + fmt(t.oldSum) + "  ·  " : "") + (t.total - t.done) + " बाकी";
+      (t.oldSum ? "Old ₹" + fmt(t.oldSum) + "  ·  " : "") + (t.total - t.done) + " left";
     document.getElementById("bar").style.width = t.total ? (t.done / t.total * 100) + "%" : "0%";
     var rc = Object.keys(state.removed).length;
     var rb = document.getElementById("mRestore");
-    rb.textContent = "♻️ हटाए हुए वापस लाओ (" + rc + ")";
+    rb.textContent = "♻️ Restore deleted (" + rc + ")";
     rb.disabled = !rc;
   }
 
@@ -376,9 +376,9 @@
   // add item
   document.getElementById("mAdd").addEventListener("click", function () {
     openSheet(false);
-    var n = prompt("नया आइटम का नाम:");
+    var n = prompt("New item name:");
     if (!n || !n.trim()) return;
-    var q = prompt("कितना? (खाली छोड़ सकते हो)", "") || "";
+    var q = prompt("How much? (can leave blank)", "") || "";
     var id = "x-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
     state.extra.push({ id: id, hi: n.trim(), qty: q.trim() });
     save(); syncExtra(); render();
@@ -390,7 +390,7 @@
   document.getElementById("mRestore").addEventListener("click", function () {
     var n = Object.keys(state.removed).length;
     if (!n) return;
-    if (!confirm(n + " हटाए हुए आइटम वापस लाएँ?\n(जो आइटम आपने खुद जोड़े थे वो वापस नहीं आएँगे)")) return;
+    if (!confirm("Restore " + n + " deleted item(s)?\n(Items you added yourself will not come back)")) return;
     state.removed = {};
     save(); render(); openSheet(false);
   });
@@ -424,7 +424,7 @@
     };
     var txt = JSON.stringify(payload, null, 2);
     if (!download("dmart-list-backup_" + stamp() + ".json", txt)) {
-      prompt("कॉपी कर लो (backup):", txt);
+      prompt("Copy this (backup):", txt);
     }
     openSheet(false);
   });
@@ -442,11 +442,11 @@
     r.onload = function () {
       var p;
       try { p = JSON.parse(String(r.result)); }
-      catch (e) { alert("❌ फाइल पढ़ी नहीं गई — सही JSON बैकअप चुनो."); return; }
+      catch (e) { alert("❌ Could not read the file — pick a valid JSON backup."); return; }
 
       var d = (p && p.data) ? p.data : p;
       if (!d || typeof d !== "object" || (!d.price && !d.done && !d.qty && !d.extra)) {
-        alert("❌ ये इस ऐप का बैकअप नहीं लगता."); return;
+        alert("❌ That does not look like a backup from this app."); return;
       }
 
       var nP = Object.keys(d.price || {}).length,
@@ -454,10 +454,10 @@
           nQ = Object.keys(d.qty   || {}).length,
           nX = (d.extra || []).length;
 
-      if (!confirm("इम्पोर्ट करें?\n\n" + nD + " टिक · " + nP + " भाव · " +
-                   nQ + " मात्रा · " + nX + " जोड़े हुए आइटम\n\n" +
-                   "ये आपके मौजूदा डेटा में मिला दिया जाएगा (merge).\n" +
-                   "पुराना डेटा बैकअप में रहेगा.")) return;
+      if (!confirm("Import this backup?\n\n" + nD + " ticked · " + nP + " prices · " +
+                   nQ + " quantities · " + nX + " added items\n\n" +
+                   "It will be MERGED into your current data.\n" +
+                   "Your existing data is kept in a backup.")) return;
 
       try { localStorage.setItem(BKEY, JSON.stringify(state)); } catch (e) {}
 
@@ -474,9 +474,9 @@
         });
       }
       save(); syncExtra(); render();
-      alert("✅ इम्पोर्ट हो गया.");
+      alert("✅ Import done.");
     };
-    r.onerror = function () { alert("❌ फाइल नहीं खुली."); };
+    r.onerror = function () { alert("❌ Could not open the file."); };
     r.readAsText(f);
   });
 
@@ -484,15 +484,15 @@
   document.getElementById("mCopy").addEventListener("click", function () {
     var txt = asText();
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(function () { alert("📋 कॉपी हो गया."); },
-                                              function () { prompt("कॉपी करो:", txt); });
-    } else prompt("कॉपी करो:", txt);
+      navigator.clipboard.writeText(txt).then(function () { alert("📋 Copied."); },
+                                              function () { prompt("Copy this:", txt); });
+    } else prompt("Copy this:", txt);
     openSheet(false);
   });
 
   function asText() {
     var t = totals(), lines = [];
-    lines.push("DMart लिस्ट — " + new Date().toLocaleDateString("en-IN"));
+    lines.push("DMart List — " + new Date().toLocaleDateString("en-IN"));
     lines.push("");
     model.forEach(function (g) {
       var lv = live(g); if (!lv.length) return;
@@ -501,14 +501,14 @@
         var np = newPrice(i), parts = [(state.done[i.id] ? "[x] " : "[ ] ") + nameOf(i)];
         var q = tookQty(i) || i.qty;
         if (q) parts.push(q);
-        if (np != null) parts.push("₹" + np + (i.est != null ? " (पुराना ₹" + i.est + ")" : ""));
+        if (np != null) parts.push("₹" + np + (i.est != null ? " (old ₹" + i.est + ")" : ""));
         lines.push(parts.join(" — "));
       });
       lines.push("");
     });
-    lines.push("लिया: " + t.done + "/" + t.total + "   बाकी: " + (t.total - t.done));
-    lines.push("नया कुल: ₹" + fmt(t.spent));
-    if (t.oldSum) lines.push("पुराना: ₹" + fmt(t.oldSum) + "   अंतर: " +
+    lines.push("Bought: " + t.done + "/" + t.total + "   Left: " + (t.total - t.done));
+    lines.push("New total: ₹" + fmt(t.spent));
+    if (t.oldSum) lines.push("Old: ₹" + fmt(t.oldSum) + "   Diff: " +
       (t.diff >= 0 ? "+" : "−") + "₹" + fmt(Math.abs(t.diff)));
     return lines.join("\n");
   }
@@ -529,30 +529,30 @@
     });
 
     var h = [];
-    h.push('<h1>DMart खरीदी लिस्ट</h1>');
+    h.push('<h1>DMart Shopping List</h1>');
     h.push('<p class="pmeta">' + new Date().toLocaleString("en-IN") +
-           '  ·  लिया ' + t.done + '/' + t.total + '  ·  बाकी ' + (t.total - t.done) + '</p>');
+           '  ·  Bought ' + t.done + '/' + t.total + '  ·  Left ' + (t.total - t.done) + '</p>');
 
     h.push('<table class="psum"><tr>' +
-           '<td><b>नया कुल खर्च</b><br>₹' + fmt(t.spent) + '</td>' +
-           '<td><b>पुराना अंदाज़</b><br>₹' + fmt(t.oldSum) + '</td>' +
-           '<td><b>अंतर</b><br>' + (t.diff >= 0 ? "+" : "−") + '₹' + fmt(Math.abs(t.diff)) + '</td>' +
+           '<td><b>New total spent</b><br>₹' + fmt(t.spent) + '</td>' +
+           '<td><b>Old estimate</b><br>₹' + fmt(t.oldSum) + '</td>' +
+           '<td><b>Difference</b><br>' + (t.diff >= 0 ? "+" : "−") + '₹' + fmt(Math.abs(t.diff)) + '</td>' +
            '</tr></table>');
 
-    h.push('<h2>✓ लिया हुआ — ' + done.length + ' आइटम</h2>');
+    h.push('<h2>✓ Bought — ' + done.length + ' items</h2>');
     h.push(table(done, true));
 
-    h.push('<h2 class="brk">☐ बाकी — ' + left.length + ' आइटम</h2>');
+    h.push('<h2 class="brk">☐ Remaining — ' + left.length + ' items</h2>');
     h.push(table(left, false));
 
     document.getElementById("print").innerHTML = h.join("");
   }
 
   function table(rows, withPrice) {
-    if (!rows.length) return '<p class="pnone">— कुछ नहीं —</p>';
-    var h = ['<table class="ptab"><thead><tr><th>#</th><th>आइटम</th><th>पेज</th><th>मात्रा</th>'];
-    h.push(withPrice ? '<th class="r">पुराना</th><th class="r">नया</th><th class="r">अंतर</th>'
-                     : '<th class="r">पुराना भाव</th><th>✓</th>');
+    if (!rows.length) return '<p class="pnone">— none —</p>';
+    var h = ['<table class="ptab"><thead><tr><th>#</th><th>Item</th><th>Page</th><th>Qty</th>'];
+    h.push(withPrice ? '<th class="r">Old</th><th class="r">New</th><th class="r">Diff</th>'
+                     : '<th class="r">Old price</th><th>✓</th>');
     h.push('</tr></thead><tbody>');
     rows.forEach(function (r, n) {
       var i = r.i, np = newPrice(i);
@@ -582,8 +582,8 @@
   // ---- reset (guarded) ---------------------------------------------------
   document.getElementById("mReset").addEventListener("click", function () {
     openSheet(false);
-    if (!confirm("⚠️ सब टिक, भाव और मात्रा मिट जाएँगे.\n\nपहले मेन्यू → एक्सपोर्ट से बैकअप ले लो!\n\nआगे बढ़ें?")) return;
-    if (prompt('पक्का? नीचे "DELETE" लिखो:') !== "DELETE") { alert("रुक गया — कुछ नहीं मिटा."); return; }
+    if (!confirm("⚠️ All ticks, prices and quantities will be erased.\n\nTake a backup first: Menu -> Export!\n\nContinue?")) return;
+    if (prompt('Are you sure? Type DELETE below:') !== "DELETE") { alert("Stopped — nothing was erased."); return; }
     try { localStorage.setItem(BKEY, JSON.stringify(state)); } catch (e) {}
     state.done = {}; state.price = {}; state.qty = {};
     save(); render();

@@ -5,8 +5,8 @@
 const PAGES = [
   {
     id: "p1",
-    title: "पेज 1",
-    sub: "किराना + घरेलू सामान",
+    title: "Page 1",
+    sub: "Groceries + household",
     items: [
       { hi: "तेल पीपा",            en: "Oil Tin (15L)",          qty: "1",            est: 2970 },
       { hi: "शक्कर",               en: "Sugar",                  qty: "12 किलो",      est: 720 },
@@ -39,8 +39,8 @@ const PAGES = [
   },
   {
     id: "p2",
-    title: "पेज 2",
-    sub: "मसाले + प्रोविजन",
+    title: "Page 2",
+    sub: "Spices + provisions",
     items: [
       { hi: "घी",                  en: "Ghee",                   qty: "1 किलो (1 टिन)", est: 1195 },
       { hi: "पोस्तदाना",           en: "Poppy Seeds",            qty: "3 किलो",       est: 450 },
@@ -78,8 +78,8 @@ const PAGES = [
   },
   {
     id: "p3",
-    title: "पेज 3",
-    sub: "ड्राई फ्रूट्स + तेल (आधा पेज)",
+    title: "Page 3",
+    sub: "Dry fruits + oils (half page)",
     items: [
       { hi: "चन्दन डिब्बी",        en: "Chandan Dibbi",          qty: "1  (रेट ₹25)", est: 50 },
       { hi: "पीसा खोपरा",          en: "Ground Copra",           qty: "₹50 का",       est: 50 },
