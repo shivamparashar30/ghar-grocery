@@ -2,121 +2,107 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
-<meta name="theme-color" content="#0b0d17">
-<meta name="description" content="DMart grocery list — tap to strike off, enter price, saved on this phone.">
-<title>DMart List</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="description" content="Monthly ration list — tap to tick off, add prices, print.">
+<title>Ration List</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
 </head>
 <body>
 
-<header>
+<!-- ===================== MONTH PICKER ===================== -->
+<section id="monthView">
   <div class="wrap">
-    <div class="hd">
-      <div class="logo">🛒</div>
-      <div>
-        <h1>DMart Shopping List</h1>
-        <p>Tap a name to strike it off · ✎ edit · 🗑 delete</p>
+    <header class="mhead">
+      <h1>राशन लिस्ट</h1>
+      <p>Ration List · महीना चुनें</p>
+      <div id="syncPill" class="pill">…</div>
+    </header>
+    <div id="monthCards" class="mcards"></div>
+    <p class="foot">डेटा सब डिवाइस पर एक जैसा रहता है · shared across devices</p>
+  </div>
+</section>
+
+<!-- ===================== LIST ===================== -->
+<section id="listView" hidden>
+  <header class="lhead">
+    <div class="wrap">
+      <div class="lbar">
+        <button id="back" class="icon" aria-label="back">←</button>
+        <div class="ltitle">
+          <h2 id="mTitle">—</h2>
+          <p id="mSub">—</p>
+        </div>
+        <button id="menu" class="icon" aria-label="menu">⋯</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><span class="k">लिया · Done</span><b id="sDone">0/0</b></div>
+        <div class="stat"><span class="k">बाकी · Left</span><b id="sLeft">0</b></div>
+        <div class="stat"><span class="k">खर्च · Spent</span><b id="sSpent" class="g">₹0</b></div>
+      </div>
+      <div class="bar"><span id="bar"></span></div>
+
+      <input type="search" id="q" placeholder="खोजें · search (e.g. pisa, moong)" autocomplete="off">
+      <div class="chips" id="chips">
+        <button data-f="all" class="on">सब</button>
+        <button data-f="todo">बाकी</button>
+        <button data-f="done">लिया</button>
       </div>
     </div>
+  </header>
 
-    <div class="stats">
-      <div class="stat"><div class="k">Done</div><div class="v green" id="sDone">0/0</div></div>
-      <div class="stat"><div class="k">Old total</div><div class="v" id="sOld">₹0</div></div>
-      <div class="stat"><div class="k">Difference</div><div class="v ind" id="sDiff">₹0</div></div>
+  <main class="wrap" id="list"></main>
+
+  <footer class="lfoot">
+    <div class="wrap fbar">
+      <div class="tot"><span>कुल · Total</span><b id="total">₹0</b></div>
+      <button class="btn" id="print">डाउनलोड / Print</button>
     </div>
-    <div class="bar"><span id="bar"></span></div>
-
-    <div class="tools">
-      <input type="search" id="q" placeholder="Search items…" autocomplete="off">
-      <div class="seg">
-        <button data-f="all" class="on">All</button>
-        <button data-f="todo">Left</button>
-        <button data-f="done">Done</button>
-      </div>
-    </div>
-  </div>
-</header>
-
-<main class="wrap" id="list"></main>
-
-<div class="wrap">
-  <p class="note">
-<b>✎</b> rename an item (e.g. "घी" → "घी — Amul 1kg") · <b>🗑</b> delete it.<br>
-    Everything is saved on this phone — site updates never wipe your data.<br>
-    <b>☰ Menu</b> has: Export (backup), Import, Print, Copy.<br>
-  </p>
-</div>
-
-<footer>
-  <div class="wrap ft">
-    <div class="tot">
-      <div class="k">New total spent</div>
-      <div class="v" id="total">₹0</div>
-      <div class="s" id="tsub">0 left</div>
-    </div>
-    <button class="btn" id="menu">☰ Menu</button>
-  </div>
-</footer>
+  </footer>
+</section>
 
 <input type="file" id="file" accept="application/json,.json" hidden>
-<input type="file" id="photo" accept="image/*" multiple hidden>
 
+<!-- ===================== MENU ===================== -->
 <div id="sheet" class="sheet">
-  <div class="sheet-bg" id="sheetBg"></div>
-  <div class="sheet-panel" role="dialog" aria-label="menu">
-    <div class="sheet-grab"></div>
-    <button class="mi" id="mAdd">➕ <span>Add new item</span></button>
-    <button class="mi" id="mPrint">🖨️ <span>Print / PDF<small>Choose what to include</small></span></button>
-    <button class="mi" id="mPhotos">📷 <span>Photos / extra bills (0)<small>Attach to the printed PDF</small></span></button>
-    <button class="mi" id="mExport">⬇️ <span>Export (backup)<small>All your data as a .json file</small></span></button>
-    <button class="mi" id="mImport">⬆️ <span>Import<small>Restore data from a backup file</small></span></button>
+  <div class="sheet-bg" data-close></div>
+  <div class="sheet-panel">
+    <div class="grab"></div>
+    <button class="mi" id="mAdd">➕ <span>नया आइटम · Add item</span></button>
+    <button class="mi" id="mPrint">🖨️ <span>Print / Save as PDF</span></button>
     <button class="mi" id="mCopy">📋 <span>Copy as text</span></button>
+    <button class="mi" id="mExport">⬇️ <span>Export backup</span></button>
+    <button class="mi" id="mImport">⬆️ <span>Import backup</span></button>
     <button class="mi" id="mRestore">♻️ <span>Restore deleted (0)</span></button>
-    <button class="mi danger" id="mReset">⚠️ <span>Erase everything (reset)</span></button>
-    <button class="mi close" id="mClose">Close</button>
+    <button class="mi close" data-close>Close</button>
   </div>
 </div>
 
-<!-- print options -->
+<!-- ===================== PRINT OPTIONS ===================== -->
 <div id="prsheet" class="sheet">
-  <div class="sheet-bg" id="prBg"></div>
-  <div class="sheet-panel" role="dialog" aria-label="print options">
-    <div class="sheet-grab"></div>
-    <h3 class="sh">What to print</h3>
-    <label class="opt"><input type="checkbox" id="o_bought"><span>Receipt — items I bought<small>What you picked up, with quantity</small></span></label>
-    <label class="opt"><input type="checkbox" id="o_remaining"><span>Shopping list — still to buy<small>No prices, with tick boxes</small></span></label>
-    <label class="opt"><input type="checkbox" id="o_pics"><span>Attached photos <em id="picsHint"></em><small>Bills / lists from other shops</small></span></label>
-
-    <h3 class="sh">Prices on the receipt</h3>
-    <label class="opt"><input type="checkbox" id="o_newP"><span>Price I paid<small>The new price you entered</small></span></label>
-    <label class="opt"><input type="checkbox" id="o_oldP"><span>Old list price<small>The estimate from the handwritten list</small></span></label>
-    <label class="opt"><input type="checkbox" id="o_diff"><span>Difference<small>Needs both prices on</small></span></label>
-
+  <div class="sheet-bg" data-close></div>
+  <div class="sheet-panel">
+    <div class="grab"></div>
+    <h3 class="sh">क्या प्रिंट करें · What to print</h3>
+    <label class="opt"><input type="checkbox" id="o_todo"><span>बाकी लिस्ट · Still to buy<small>भाव नहीं, टिक बॉक्स के साथ</small></span></label>
+    <label class="opt"><input type="checkbox" id="o_done"><span>लिया हुआ · Bought<small>मात्रा के साथ</small></span></label>
+    <h3 class="sh">भाव · Prices</h3>
+    <label class="opt"><input type="checkbox" id="o_price"><span>भाव दिखाएँ · Show prices<small>सिर्फ़ "लिया हुआ" में</small></span></label>
     <button class="btn wide" id="prGo">🖨️ Print / Save as PDF</button>
-    <button class="mi close" id="prClose">Close</button>
-  </div>
-</div>
-
-<!-- photos -->
-<div id="phsheet" class="sheet">
-  <div class="sheet-bg" id="phBg"></div>
-  <div class="sheet-panel" role="dialog" aria-label="photos">
-    <div class="sheet-grab"></div>
-    <h3 class="sh">Photos / extra bills</h3>
-    <div id="phList" class="phgrid"></div>
-    <button class="btn wide" id="phAdd">📷 Add photo</button>
-    <button class="mi close" id="phClose">Close</button>
+    <button class="mi close" data-close>Close</button>
   </div>
 </div>
 
 <div id="print" aria-hidden="true"></div>
 
+<script src="translit.js"></script>
 <script src="items.js"></script>
+<script src="data.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

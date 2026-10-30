@@ -2,258 +2,308 @@
   "use strict";
 
   /* ------------------------------------------------------------------
-     DATA SAFETY NOTES — read before editing
-     1. KEY must never change: existing phones hold data under it.
-     2. Item ids are "<pageId>-<index>" from items.js. NEVER reorder,
-        insert or delete entries in items.js — ids would shift and every
-        saved price/qty would attach to the wrong item. Append only,
-        at the END of a page's array.
-     3. load() must tolerate older saved shapes (missing fields).
-     4. A rolling backup is kept under BKEY before each write.
+     IDS: "<groupId>-<index>". Never reorder / insert / delete inside an
+     items array in data.js or items.js — append at the end only, or every
+     saved price moves to the wrong item.
      ------------------------------------------------------------------ */
-  var KEY  = "dmart-list-v1";
-  var BKEY = "dmart-list-v1-backup";
+  var KEY  = "ration-v1";
+  var OLD  = "dmart-list-v1";      // previous app's store, migrated once
+  var API  = "/api/list";
 
-  var state = load();   // { done, price, qty, name, extra, removed }
-  var filter = "all";
-  var query = "";
-
+  // ---- state ------------------------------------------------------------
   function blank() {
-    return { done: {}, price: {}, qty: {}, name: {}, extra: [], removed: {} };
+    return { done:{}, price:{}, qty:{}, name:{}, extra:[], removed:{}, seeded:{},
+             rev:0, updatedAt:0 };
   }
 
-  function load() {
+  function sane(p) {
     var s = blank();
-    try {
-      var raw = localStorage.getItem(KEY);
-      if (!raw) return s;
-      var p = JSON.parse(raw);
-      if (!p || typeof p !== "object") return s;
-      s.done    = p.done    && typeof p.done    === "object" ? p.done    : {};
-      s.price   = p.price   && typeof p.price   === "object" ? p.price   : {};
-      s.qty     = p.qty     && typeof p.qty     === "object" ? p.qty     : {};
-      s.name    = p.name    && typeof p.name    === "object" ? p.name    : {};
-      s.removed = p.removed && typeof p.removed === "object" ? p.removed : {};
-      s.extra   = Array.isArray(p.extra) ? p.extra.filter(function (e) {
-        return e && e.id && typeof e.hi === "string";
-      }) : [];
-    } catch (e) { /* corrupt or blocked storage -> start clean, don't crash */ }
+    if (!p || typeof p !== "object") return s;
+    ["done","price","qty","name","removed","seeded"].forEach(function (k) {
+      if (p[k] && typeof p[k] === "object" && !Array.isArray(p[k])) s[k] = p[k];
+    });
+    s.extra = Array.isArray(p.extra)
+      ? p.extra.filter(function (e) { return e && e.id && typeof e.hi === "string"; }) : [];
+    s.rev = Number(p.rev) || 0;
+    s.updatedAt = Number(p.updatedAt) || 0;
     return s;
   }
 
-  function save() {
+  function load() {
     try {
-      var prev = localStorage.getItem(KEY);
-      if (prev) localStorage.setItem(BKEY, prev);   // rolling one-step backup
-      localStorage.setItem(KEY, JSON.stringify(state));
+      var raw = localStorage.getItem(KEY);
+      if (raw) return sane(JSON.parse(raw));
+      var old = localStorage.getItem(OLD);         // one-time migration
+      if (old) { var m = sane(JSON.parse(old)); m.updatedAt = Date.now(); return m; }
     } catch (e) {}
+    return blank();
   }
 
-  // ---- model -------------------------------------------------------------
-  var model = [];
-  PAGES.forEach(function (p) {
-    model.push({
-      id: p.id, title: p.title, sub: p.sub,
-      items: p.items.map(function (it, i) {
-        return { id: p.id + "-" + i, page: p.id, hi: it.hi, en: it.en,
-                 qty: it.qty, est: it.est, u: !!it.u };
+  var state = load();
+
+  function persist() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+  }
+
+  var pushT = null;
+  function save(push) {
+    state.updatedAt = Date.now();
+    persist();
+    if (push !== false) {
+      clearTimeout(pushT);
+      pushT = setTimeout(pushUp, 900);
+    }
+  }
+
+  // ---- model ------------------------------------------------------------
+  var months = [];
+  MONTHS.forEach(function (m) { months.push(mk(m)); });
+
+  // the earlier handwritten list, kept so its saved prices are never orphaned
+  if (typeof PAGES !== "undefined" && PAGES.length) {
+    months.push(mk({
+      id: "old", title: "पुरानी लिस्ट", en: "Previous list",
+      groups: PAGES.map(function (p) {
+        return { id: p.id, title: p.title, en: p.sub, items: p.items };
       })
+    }));
+  }
+
+  function mk(m) {
+    return {
+      id: m.id, title: m.title, en: m.en,
+      groups: m.groups.map(function (g) {
+        return {
+          id: g.id, title: g.title, en: g.en, bought: !!g.bought,
+          items: g.items.map(function (it, i) {
+            return { id: g.id + "-" + i, gid: g.id, hi: it.hi, en: it.en,
+                     qty: it.qty, paid: it.paid != null ? it.paid : null };
+          })
+        };
+      })
+    };
+  }
+
+  function extraGroup(m) {
+    var gid = m.id + "-extra";
+    var g = { id: gid, title: "जोड़े हुए", en: "Added by me", bought: false, items: [] };
+    g.items = state.extra.filter(function (e) { return e.m === m.id; })
+      .map(function (e) {
+        return { id: e.id, gid: gid, hi: e.hi, en: "", qty: e.qty || "", paid: null };
+      });
+    return g;
+  }
+
+  function groupsOf(m) { return m.groups.concat([extraGroup(m)]); }
+  function liveItems(g) {
+    return g.items.filter(function (i) { return !state.removed[i.id]; });
+  }
+  function allOf(m) {
+    return groupsOf(m).reduce(function (a, g) { return a.concat(liveItems(g)); }, []);
+  }
+
+  function nameOf(i) { return state.name[i.id] != null ? state.name[i.id] : i.hi; }
+  function priceOf(i) {
+    if (state.price[i.id] != null && state.price[i.id] !== "") {
+      var v = parseFloat(state.price[i.id]); return isNaN(v) ? null : v;
+    }
+    return i.paid != null ? i.paid : null;
+  }
+  function priceVal(i) {
+    return state.price[i.id] != null ? state.price[i.id]
+         : (i.paid != null ? String(i.paid) : "");
+  }
+  function qtyOf(i) { return state.qty[i.id] || ""; }
+
+  // items in a "bought" group start ticked, once
+  months.forEach(function (m) {
+    m.groups.forEach(function (g) {
+      if (!g.bought || state.seeded[g.id]) return;
+      g.items.forEach(function (i) { state.done[i.id] = 1; });
+      state.seeded[g.id] = 1;
     });
   });
-  var EXTRA = { id: "extra", title: "My Added Items", sub: "added by me", items: [] };
-  model.push(EXTRA);
+  persist();
 
-  function syncExtra() {
-    EXTRA.items = state.extra.map(function (e) {
-      return { id: e.id, page: "extra", hi: e.hi, en: "", qty: e.qty || "", est: null, u: false };
+  // ---- search -----------------------------------------------------------
+  var qstr = "", qkey = "", qskel = "";
+  function hit(i) {
+    if (!qstr) return true;
+    var hay = nameOf(i) + " " + (i.en || "") + " " + (i.qty || "");
+    if (hay.toLowerCase().indexOf(qstr) !== -1) return true;
+    // folding collapses repeats ("zzzz" -> "j"), so a 1-char key would
+    // match almost everything. Only fuzzy-match from 2 characters up.
+    if (qkey.length < 2) return false;
+    var k = Translit.key(hay), s = Translit.skel(hay);
+    return k.indexOf(qkey) !== -1 || (qskel.length > 1 && s.indexOf(qskel) !== -1);
+  }
+
+  // ---- views ------------------------------------------------------------
+  var monthView = document.getElementById("monthView");
+  var listView  = document.getElementById("listView");
+  var listEl    = document.getElementById("list");
+  var cur = null, filter = "all";
+
+  function showMonths() {
+    cur = null;
+    listView.hidden = true; monthView.hidden = false;
+    location.hash = "";
+    var box = document.getElementById("monthCards");
+    box.innerHTML = "";
+    months.forEach(function (m) {
+      var items = allOf(m);
+      var done = items.filter(function (i) { return state.done[i.id]; }).length;
+      var spent = items.reduce(function (a, i) {
+        return a + (state.done[i.id] ? (priceOf(i) || 0) : 0);
+      }, 0);
+      var b = document.createElement("button");
+      b.className = "mcard";
+      b.innerHTML =
+        '<div class="top"><div class="ic">🧾</div><div><h3></h3><div class="en"></div></div>' +
+        '<div class="go">›</div></div>' +
+        '<div class="bar"><span></span></div>' +
+        '<div class="row2"><span><b>' + done + '</b> / ' + items.length + ' लिया</span>' +
+        '<span><b>' + (items.length - done) + '</b> बाकी</span>' +
+        '<span>खर्च <b>₹' + fmt(spent) + '</b></span></div>';
+      b.querySelector("h3").textContent = m.title;
+      b.querySelector(".en").textContent = m.en;
+      b.querySelector(".bar span").style.width =
+        (items.length ? done / items.length * 100 : 0) + "%";
+      b.addEventListener("click", function () { openMonth(m.id); });
+      box.appendChild(b);
     });
   }
-  syncExtra();
 
-  function nameOf(it) { return state.name[it.id] != null ? state.name[it.id] : it.hi; }
-  function live(g) { return g.items.filter(function (i) { return !state.removed[i.id]; }); }
-  function allItems() {
-    return model.reduce(function (a, g) { return a.concat(live(g)); }, []);
-  }
-  function newPrice(it) { var v = parseFloat(state.price[it.id]); return isNaN(v) ? null : v; }
-  function tookQty(it) { return state.qty[it.id] || ""; }
-
-  // ---- render ------------------------------------------------------------
-  var listEl = document.getElementById("list");
-
-  function matches(it) {
-    if (state.removed[it.id]) return false;
-    var done = !!state.done[it.id];
-    if (filter === "todo" && done) return false;
-    if (filter === "done" && !done) return false;
-    if (query) {
-      var hay = (nameOf(it) + " " + (it.en || "") + " " + (it.qty || "")).toLowerCase();
-      if (hay.indexOf(query) === -1) return false;
-    }
-    return true;
+  function openMonth(id) {
+    cur = months.filter(function (m) { return m.id === id; })[0] || months[0];
+    monthView.hidden = true; listView.hidden = false;
+    location.hash = cur.id;
+    document.getElementById("mTitle").textContent = cur.title;
+    document.getElementById("mSub").textContent = cur.en;
+    document.getElementById("q").value = ""; qstr = qkey = qskel = "";
+    window.scrollTo(0, 0);
+    render();
   }
 
+  document.getElementById("back").addEventListener("click", showMonths);
+  window.addEventListener("hashchange", function () {
+    var h = location.hash.replace("#", "");
+    if (!h && cur) showMonths();
+  });
+
+  // ---- render list ------------------------------------------------------
   function render() {
+    if (!cur) return;
     listEl.innerHTML = "";
     var shown = 0;
 
-    model.forEach(function (g) {
-      var vis = g.items.filter(matches);
+    groupsOf(cur).forEach(function (g) {
+      var lv = liveItems(g);
+      if (!lv.length) return;
+      var vis = lv.filter(function (i) {
+        var d = !!state.done[i.id];
+        if (filter === "todo" && d) return false;
+        if (filter === "done" && !d) return false;
+        return hit(i);
+      });
       if (!vis.length) return;
       shown += vis.length;
-      var lv = live(g);
 
       var h = document.createElement("div");
       h.className = "grp";
-      h.innerHTML = '<h2></h2><small></small><span class="cnt"></span>';
-      h.querySelector("h2").textContent = g.title;
-      h.querySelector("small").textContent = g.sub;
+      h.innerHTML = '<h3></h3><small></small><span class="cnt"></span>';
+      h.querySelector("h3").textContent = g.title;
+      h.querySelector("small").textContent = g.en || "";
       h.querySelector(".cnt").textContent =
         lv.filter(function (i) { return state.done[i.id]; }).length + "/" + lv.length;
       listEl.appendChild(h);
 
       var ul = document.createElement("ul");
-      vis.forEach(function (it) { ul.appendChild(row(it)); });
+      vis.forEach(function (i) { ul.appendChild(row(i)); });
       listEl.appendChild(ul);
     });
 
     if (!shown) {
       var e = document.createElement("div");
       e.className = "empty";
-      e.textContent = query ? "No match 🤷" : "Nothing here";
+      e.textContent = qstr ? "कुछ नहीं मिला · no match" : "खाली है · empty";
       listEl.appendChild(e);
     }
-    updateStats();
+    stats();
   }
 
-  function row(it) {
+  function row(i) {
     var li = document.createElement("li");
-    li.className = "row" + (state.done[it.id] ? " done" : "");
-    li.dataset.id = it.id;
+    li.className = "row" + (state.done[i.id] ? " done" : "");
+    li.dataset.id = i.id;
 
     var tick = document.createElement("button");
     tick.className = "tick"; tick.textContent = "✓";
-    tick.setAttribute("aria-label", "mark bought");
+    tick.setAttribute("aria-label", "tick");
 
-    var body = document.createElement("div");
-    body.className = "body";
+    var body = document.createElement("div"); body.className = "body";
+    var top = document.createElement("div"); top.className = "top";
+    var tap = document.createElement("div"); tap.className = "tap";
 
-    var top = document.createElement("div");
-    top.className = "top";
+    var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = nameOf(i);
+    tap.appendChild(nm);
+    if (i.en) { var en = document.createElement("div"); en.className = "en"; en.textContent = i.en; tap.appendChild(en); }
+    if (i.qty) { var qc = document.createElement("div"); qc.className = "qchip"; qc.textContent = i.qty; tap.appendChild(qc); }
 
-    var tapzone = document.createElement("div");
-    tapzone.className = "tapzone";
+    var ed = document.createElement("button"); ed.className = "mini"; ed.textContent = "✎";
+    ed.setAttribute("aria-label", "rename");
+    var dl = document.createElement("button"); dl.className = "mini"; dl.textContent = "🗑";
+    dl.setAttribute("aria-label", "delete");
 
-    var nm = document.createElement("div");
-    nm.className = "nm";
-    setName();
-    function setName() {
-      nm.textContent = nameOf(it);
-      if (it.u) {
-        var qm = document.createElement("span");
-        qm.className = "q"; qm.textContent = "?";
-        nm.appendChild(qm);
-      }
-    }
-    tapzone.appendChild(nm);
-
-    var bits = [];
-    if (it.en) bits.push(it.en);
-    if (it.qty) bits.push("List: " + it.qty);
-    if (bits.length) {
-      var meta = document.createElement("div");
-      meta.className = "meta";
-      meta.textContent = bits.join("  ·  ");
-      tapzone.appendChild(meta);
-    }
-
-    var ed = document.createElement("button");
-    ed.className = "edit"; ed.textContent = "✎";
-    ed.setAttribute("aria-label", "edit name");
-
-    var del = document.createElement("button");
-    del.className = "edit del"; del.textContent = "🗑";
-    del.setAttribute("aria-label", "delete item");
-
-    top.appendChild(tapzone); top.appendChild(ed); top.appendChild(del);
+    top.appendChild(tap); top.appendChild(ed); top.appendChild(dl);
     body.appendChild(top);
 
-    var ctl = document.createElement("div");
-    ctl.className = "ctl";
+    var ctl = document.createElement("div"); ctl.className = "ctl";
+    var qf = document.createElement("div"); qf.className = "fld f-qty";
+    qf.innerHTML = '<label>लिया</label>';
+    var qi = document.createElement("input");
+    qi.type = "text"; qi.placeholder = i.qty || "qty"; qi.value = qtyOf(i);
+    qi.setAttribute("aria-label", "quantity taken");
+    qf.appendChild(qi);
 
-    var qWrap = document.createElement("label");
-    qWrap.className = "fld";
-    qWrap.innerHTML = '<span class="lbl">Qty taken</span>';
-    var qIn = document.createElement("input");
-    qIn.type = "text"; qIn.className = "inp qty";
-    qIn.placeholder = it.qty || "qty";
-    qIn.value = tookQty(it);
-    qWrap.appendChild(qIn);
+    var pf = document.createElement("div"); pf.className = "fld f-price";
+    pf.innerHTML = '<label>₹</label>';
+    var pi = document.createElement("input");
+    pi.type = "text"; pi.inputMode = "decimal"; pi.placeholder = "0"; pi.value = priceVal(i);
+    pi.setAttribute("aria-label", "price");
+    pf.appendChild(pi);
 
-    var pWrap = document.createElement("label");
-    pWrap.className = "fld";
-    pWrap.innerHTML = '<span class="lbl">New price ₹</span>';
-    var pIn = document.createElement("input");
-    pIn.type = "text"; pIn.className = "inp price";
-    pIn.inputMode = "decimal"; pIn.placeholder = "0";
-    pIn.value = state.price[it.id] != null ? state.price[it.id] : "";
-    pWrap.appendChild(pIn);
-
-    var cmp = document.createElement("div");
-    cmp.className = "cmp";
-
-    ctl.appendChild(qWrap); ctl.appendChild(pWrap); ctl.appendChild(cmp);
+    ctl.appendChild(qf); ctl.appendChild(pf);
     body.appendChild(ctl);
-
     li.appendChild(tick); li.appendChild(body);
 
-    function paintCmp() {
-      cmp.innerHTML = "";
-      var np = newPrice(it);
-      if (it.est == null) {
-        if (np != null) cmp.innerHTML = '<span class="chip neu">New ₹' + fmt(np) + "</span>";
-        return;
-      }
-      var old = document.createElement("span");
-      old.className = "chip old"; old.textContent = "Old ₹" + fmt(it.est);
-      cmp.appendChild(old);
-      if (np == null) return;
-      var d = np - it.est;
-      var chip = document.createElement("span");
-      chip.className = "chip " + (d > 0 ? "up" : d < 0 ? "down" : "same");
-      chip.textContent = d > 0 ? "▲ ₹" + fmt(d) + " more"
-                       : d < 0 ? "▼ ₹" + fmt(-d) + " saved" : "= same";
-      cmp.appendChild(chip);
-    }
-    paintCmp();
-
     function toggle() {
-      if (state.done[it.id]) delete state.done[it.id]; else state.done[it.id] = 1;
+      if (state.done[i.id]) delete state.done[i.id]; else state.done[i.id] = 1;
       save();
-      li.classList.toggle("done", !!state.done[it.id]);
-      updateStats(); refreshCounts();
+      li.classList.toggle("done", !!state.done[i.id]);
+      stats();
       if (filter !== "all") render();
     }
     tick.addEventListener("click", toggle);
-    tapzone.addEventListener("click", function () {
+    tap.addEventListener("click", function () {
       if (!li.classList.contains("editing")) toggle();
     });
 
-    qIn.addEventListener("input", function () {
-      if (qIn.value === "") delete state.qty[it.id]; else state.qty[it.id] = qIn.value;
+    qi.addEventListener("input", function () {
+      if (qi.value === "") delete state.qty[i.id]; else state.qty[i.id] = qi.value;
       save();
     });
-    pIn.addEventListener("input", function () {
-      var v = pIn.value.replace(/[^0-9.]/g, "");
-      if (v !== pIn.value) pIn.value = v;
-      if (v === "") delete state.price[it.id]; else state.price[it.id] = v;
-      save(); paintCmp(); updateStats();
+    pi.addEventListener("input", function () {
+      var v = pi.value.replace(/[^0-9.]/g, "");
+      if (v !== pi.value) pi.value = v;
+      if (v === "") delete state.price[i.id]; else state.price[i.id] = v;
+      save(); stats();
     });
-    [qIn, pIn].forEach(function (el) {
+    [qi, pi].forEach(function (el) {
       el.addEventListener("keydown", function (ev) {
         if (ev.key !== "Enter") return;
         ev.preventDefault(); el.blur();
-        if (!state.done[it.id]) toggle();
+        if (!state.done[i.id]) toggle();
       });
     });
 
@@ -261,90 +311,59 @@
       if (li.classList.contains("editing")) return;
       li.classList.add("editing");
       var inp = document.createElement("input");
-      inp.type = "text"; inp.className = "inp rename";
-      inp.value = nameOf(it);
-      nm.replaceWith(inp);
-      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
-
+      inp.type = "text"; inp.className = "rename"; inp.value = nameOf(i);
+      nm.replaceWith(inp); inp.focus();
+      inp.setSelectionRange(inp.value.length, inp.value.length);
       var closed = false;
-      function commit(keep) {
+      function fin(keep) {
         if (closed) return; closed = true;
         var v = inp.value.trim();
         if (keep && v) {
-          state.name[it.id] = v;
-          if (it.page === "extra") {
-            state.extra.forEach(function (e) { if (e.id === it.id) e.hi = v; });
-          }
+          state.name[i.id] = v;
+          state.extra.forEach(function (e) { if (e.id === i.id) e.hi = v; });
           save();
         }
-        setName();
+        nm.textContent = nameOf(i);
         inp.replaceWith(nm);
         li.classList.remove("editing");
       }
       inp.addEventListener("keydown", function (ev) {
-        if (ev.key === "Enter") { ev.preventDefault(); commit(true); }
-        if (ev.key === "Escape") commit(false);
+        if (ev.key === "Enter") { ev.preventDefault(); fin(true); }
+        if (ev.key === "Escape") fin(false);
       });
-      inp.addEventListener("blur", function () { commit(true); });
+      inp.addEventListener("blur", function () { fin(true); });
     });
 
-    del.addEventListener("click", function () {
-      if (!confirm('Delete "' + nameOf(it) + '"?\n\n(You can bring it back from Menu -> Restore deleted)')) return;
-      if (it.page === "extra") {
-        state.extra = state.extra.filter(function (e) { return e.id !== it.id; });
-        syncExtra();
-      }
-      state.removed[it.id] = 1;
+    dl.addEventListener("click", function () {
+      if (!confirm('"' + nameOf(i) + '" हटाएँ? / Delete?')) return;
+      state.removed[i.id] = 1;
+      state.extra = state.extra.filter(function (e) { return e.id !== i.id; });
       save(); render();
     });
 
     return li;
   }
 
-  function refreshCounts() {
-    var heads = listEl.querySelectorAll(".grp");
-    var i = 0;
-    model.forEach(function (g) {
-      if (!g.items.filter(matches).length) return;
-      var el = heads[i++]; if (!el) return;
-      var lv = live(g);
-      el.querySelector(".cnt").textContent =
-        lv.filter(function (x) { return state.done[x.id]; }).length + "/" + lv.length;
-    });
+  // ---- stats ------------------------------------------------------------
+  function totals(m) {
+    var items = allOf(m);
+    var done = items.filter(function (i) { return state.done[i.id]; });
+    var spent = done.reduce(function (a, i) { return a + (priceOf(i) || 0); }, 0);
+    return { items: items, total: items.length, done: done.length, spent: spent };
   }
 
-  // ---- stats -------------------------------------------------------------
-  function totals() {
-    var items = allItems();
-    var spent = 0, oldSum = 0;
-    items.forEach(function (i) {
-      var np = newPrice(i);
-      if (np == null) return;
-      spent += np;
-      if (i.est != null) oldSum += i.est;
-    });
-    return {
-      items: items,
-      total: items.length,
-      done: items.filter(function (i) { return state.done[i.id]; }).length,
-      spent: spent, oldSum: oldSum, diff: spent - oldSum
-    };
-  }
-
-  function updateStats() {
-    var t = totals();
+  function stats() {
+    if (!cur) return;
+    var t = totals(cur);
     document.getElementById("sDone").textContent = t.done + "/" + t.total;
-    document.getElementById("sOld").textContent  = "₹" + fmt(t.oldSum);
-    var dEl = document.getElementById("sDiff");
-    dEl.textContent = (t.diff > 0 ? "+₹" : t.diff < 0 ? "−₹" : "₹") + fmt(Math.abs(t.diff));
-    dEl.className = "v " + (t.diff > 0 ? "red" : t.diff < 0 ? "green" : "ind");
+    document.getElementById("sLeft").textContent = t.total - t.done;
+    document.getElementById("sSpent").textContent = "₹" + fmt(t.spent);
     document.getElementById("total").textContent = "₹" + fmt(t.spent);
-    document.getElementById("tsub").textContent =
-      (t.oldSum ? "Old ₹" + fmt(t.oldSum) + "  ·  " : "") + (t.total - t.done) + " left";
-    document.getElementById("bar").style.width = t.total ? (t.done / t.total * 100) + "%" : "0%";
+    document.getElementById("bar").style.width =
+      (t.total ? t.done / t.total * 100 : 0) + "%";
     var rc = Object.keys(state.removed).length;
     var rb = document.getElementById("mRestore");
-    rb.textContent = "♻️ Restore deleted (" + rc + ")";
+    rb.querySelector("span").textContent = "Restore deleted (" + rc + ")";
     rb.disabled = !rc;
   }
 
@@ -353,442 +372,235 @@
     return n.toLocaleString("en-IN");
   }
 
-  // ---- filters / search --------------------------------------------------
-  document.querySelectorAll(".seg button").forEach(function (b) {
+  // ---- controls ---------------------------------------------------------
+  document.querySelectorAll("#chips button").forEach(function (b) {
     b.addEventListener("click", function () {
-      document.querySelectorAll(".seg button").forEach(function (x) { x.classList.remove("on"); });
-      b.classList.add("on");
-      filter = b.dataset.f; render();
+      document.querySelectorAll("#chips button").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on"); filter = b.dataset.f; render();
     });
   });
-  var qEl = document.getElementById("q");
-  qEl.addEventListener("input", function () {
-    query = qEl.value.trim().toLowerCase(); render();
+
+  document.getElementById("q").addEventListener("input", function (e) {
+    qstr = e.target.value.trim().toLowerCase();
+    qkey = qstr ? Translit.key(qstr) : "";
+    qskel = qstr ? Translit.skel(qstr) : "";
+    render();
   });
 
-  // ---- menu sheet --------------------------------------------------------
-  var sheet = document.getElementById("sheet");
-  function openSheet(v) { sheet.classList.toggle("open", v); }
-  document.getElementById("menu").addEventListener("click", function () { openSheet(true); });
-  document.getElementById("sheetBg").addEventListener("click", function () { openSheet(false); });
-  document.getElementById("mClose").addEventListener("click", function () { openSheet(false); });
+  function sheet(id, v) { document.getElementById(id).classList.toggle("open", v); }
+  document.querySelectorAll("[data-close]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      sheet("sheet", false); sheet("prsheet", false);
+    });
+  });
+  document.getElementById("menu").addEventListener("click", function () { sheet("sheet", true); });
 
-  // add item
   document.getElementById("mAdd").addEventListener("click", function () {
-    openSheet(false);
-    var n = prompt("New item name:");
+    sheet("sheet", false);
+    var n = prompt("नया आइटम / New item:");
     if (!n || !n.trim()) return;
-    var q = prompt("How much? (can leave blank)", "") || "";
-    var id = "x-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
-    state.extra.push({ id: id, hi: n.trim(), qty: q.trim() });
-    save(); syncExtra(); render();
-    var el = listEl.querySelector('[data-id="' + id + '"]');
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    var q = prompt("कितना? / How much?", "") || "";
+    state.extra.push({ id: "x-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+                       m: cur.id, hi: n.trim(), qty: q.trim() });
+    save(); render();
   });
 
-  // restore deleted
   document.getElementById("mRestore").addEventListener("click", function () {
     var n = Object.keys(state.removed).length;
-    if (!n) return;
-    if (!confirm("Restore " + n + " deleted item(s)?\n(Items you added yourself will not come back)")) return;
-    state.removed = {};
-    save(); render(); openSheet(false);
+    if (!n || !confirm("Restore " + n + " deleted item(s)?")) return;
+    state.removed = {}; save(); render(); sheet("sheet", false);
   });
 
-  // ---- export ------------------------------------------------------------
-  function stamp() {
-    var d = new Date(), p = function (x) { return (x < 10 ? "0" : "") + x; };
-    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
-           "_" + p(d.getHours()) + p(d.getMinutes());
+  // ---- print ------------------------------------------------------------
+  var pr = { todo: true, done: false, price: false };
+  try { Object.assign(pr, JSON.parse(localStorage.getItem("ration-print") || "{}")); } catch (e) {}
+
+  function openPrint() {
+    document.getElementById("o_todo").checked = pr.todo;
+    document.getElementById("o_done").checked = pr.done;
+    document.getElementById("o_price").checked = pr.price;
+    sheet("sheet", false); sheet("prsheet", true);
   }
+  document.getElementById("print").addEventListener("click", openPrint);
+  document.getElementById("mPrint").addEventListener("click", openPrint);
 
-  function download(name, text, type) {
-    try {
-      var blob = new Blob([text], { type: type || "application/json" });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement("a");
-      a.href = url; a.download = name;
-      document.body.appendChild(a); a.click();
-      document.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-      return true;
-    } catch (e) { return false; }
-  }
-
-  document.getElementById("mExport").addEventListener("click", function () {
-    var payload = {
-      app: "dmart-list", version: 1,
-      exportedAt: new Date().toISOString(),
-      itemCount: allItems().length,
-      data: state,
-      photos: photos
-    };
-    var txt = JSON.stringify(payload, null, 2);
-    if (!download("dmart-list-backup_" + stamp() + ".json", txt)) {
-      prompt("Copy this (backup):", txt);
-    }
-    openSheet(false);
-  });
-
-  // ---- import ------------------------------------------------------------
-  var fileIn = document.getElementById("file");
-  document.getElementById("mImport").addEventListener("click", function () {
-    openSheet(false); fileIn.value = ""; fileIn.click();
-  });
-
-  fileIn.addEventListener("change", function () {
-    var f = fileIn.files && fileIn.files[0];
-    if (!f) return;
-    var r = new FileReader();
-    r.onload = function () {
-      var p;
-      try { p = JSON.parse(String(r.result)); }
-      catch (e) { alert("❌ Could not read the file — pick a valid JSON backup."); return; }
-
-      var d = (p && p.data) ? p.data : p;
-      if (!d || typeof d !== "object" || (!d.price && !d.done && !d.qty && !d.extra)) {
-        alert("❌ That does not look like a backup from this app."); return;
-      }
-
-      var nP = Object.keys(d.price || {}).length,
-          nD = Object.keys(d.done  || {}).length,
-          nQ = Object.keys(d.qty   || {}).length,
-          nX = (d.extra || []).length;
-
-      if (!confirm("Import this backup?\n\n" + nD + " ticked · " + nP + " prices · " +
-                   nQ + " quantities · " + nX + " added items\n\n" +
-                   "It will be MERGED into your current data.\n" +
-                   "Your existing data is kept in a backup.")) return;
-
-      try { localStorage.setItem(BKEY, JSON.stringify(state)); } catch (e) {}
-
-      ["done", "price", "qty", "name", "removed"].forEach(function (k) {
-        var src = d[k];
-        if (!src || typeof src !== "object") return;
-        Object.keys(src).forEach(function (id) { state[k][id] = src[id]; });
-      });
-      if (Array.isArray(d.extra)) {
-        var have = {};
-        state.extra.forEach(function (e) { have[e.id] = 1; });
-        d.extra.forEach(function (e) {
-          if (e && e.id && typeof e.hi === "string" && !have[e.id]) state.extra.push(e);
-        });
-      }
-      if (Array.isArray(p.photos) && p.photos.length) {
-        var seen = {};
-        photos.forEach(function (x) { seen[x.id] = 1; });
-        p.photos.forEach(function (x) {
-          if (x && x.id && x.data && !seen[x.id] && photos.length < MAXPHOTOS) photos.push(x);
-        });
-        savePhotos(); updatePhotoCount();
-      }
-      save(); syncExtra(); render();
-      alert("✅ Import done.");
-    };
-    r.onerror = function () { alert("❌ Could not open the file."); };
-    r.readAsText(f);
-  });
-
-  // ---- copy as text ------------------------------------------------------
-  document.getElementById("mCopy").addEventListener("click", function () {
-    var txt = asText();
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(function () { alert("📋 Copied."); },
-                                              function () { prompt("Copy this:", txt); });
-    } else prompt("Copy this:", txt);
-    openSheet(false);
-  });
-
-  function asText() {
-    var t = totals(), lines = [];
-    lines.push("DMart List — " + new Date().toLocaleDateString("en-IN"));
-    lines.push("");
-    model.forEach(function (g) {
-      var lv = live(g); if (!lv.length) return;
-      lines.push("— " + g.title + " —");
-      lv.forEach(function (i) {
-        var np = newPrice(i), parts = [(state.done[i.id] ? "[x] " : "[ ] ") + nameOf(i)];
-        var q = tookQty(i) || i.qty;
-        if (q) parts.push(q);
-        if (np != null) parts.push("₹" + np + (i.est != null ? " (old ₹" + i.est + ")" : ""));
-        lines.push(parts.join(" — "));
-      });
-      lines.push("");
-    });
-    lines.push("Bought: " + t.done + "/" + t.total + "   Left: " + (t.total - t.done));
-    lines.push("New total: ₹" + fmt(t.spent));
-    if (t.oldSum) lines.push("Old: ₹" + fmt(t.oldSum) + "   Diff: " +
-      (t.diff >= 0 ? "+" : "−") + "₹" + fmt(Math.abs(t.diff)));
-    return lines.join("\n");
-  }
-
-  // ---- photos (separate storage key: a photo failure must never
-  //      corrupt the shopping data under KEY) ------------------------------
-  var PKEY = "dmart-list-v1-photos";
-  var OKEY = "dmart-list-v1-printopts";
-  var MAXPHOTOS = 12;
-
-  function loadPhotos() {
-    try {
-      var r = localStorage.getItem(PKEY);
-      var a = r ? JSON.parse(r) : [];
-      return Array.isArray(a) ? a.filter(function (x) { return x && x.id && x.data; }) : [];
-    } catch (e) { return []; }
-  }
-  var photos = loadPhotos();
-
-  function savePhotos() {
-    try { localStorage.setItem(PKEY, JSON.stringify(photos)); return true; }
-    catch (e) {
-      alert("⚠️ Phone storage is full — photo not saved.\nDelete a photo and try again.\n\nYour list and prices are safe.");
-      photos = loadPhotos();
-      return false;
-    }
-  }
-
-  function loadOpts() {
-    var d = { bought: true, remaining: true, oldP: false, newP: true, diff: false, pics: true };
-    try {
-      var r = JSON.parse(localStorage.getItem(OKEY) || "{}");
-      Object.keys(d).forEach(function (k) { if (typeof r[k] === "boolean") d[k] = r[k]; });
-    } catch (e) {}
-    return d;
-  }
-  function saveOpts(o) { try { localStorage.setItem(OKEY, JSON.stringify(o)); } catch (e) {} }
-
-  // downscale so a phone photo is ~150KB instead of ~4MB
-  function shrink(file, cb) {
-    var url = URL.createObjectURL(file), img = new Image();
-    img.onload = function () {
-      var max = 1400, w = img.width, h = img.height;
-      var sc = Math.min(1, max / Math.max(w, h));
-      var c = document.createElement("canvas");
-      c.width = Math.max(1, Math.round(w * sc));
-      c.height = Math.max(1, Math.round(h * sc));
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url);
-      try { cb(c.toDataURL("image/jpeg", 0.72)); } catch (e) { cb(null); }
-    };
-    img.onerror = function () { URL.revokeObjectURL(url); cb(null); };
-    img.src = url;
-  }
-
-  var photoIn = document.getElementById("photo");
-  document.getElementById("mPhotos").addEventListener("click", function () {
-    openSheet(false); renderPhotos(); openPh(true);
-  });
-  document.getElementById("phAdd").addEventListener("click", function () {
-    photoIn.value = ""; photoIn.click();
-  });
-  document.getElementById("phClose").addEventListener("click", function () { openPh(false); });
-  document.getElementById("phBg").addEventListener("click", function () { openPh(false); });
-
-  function openPh(v) { document.getElementById("phsheet").classList.toggle("open", v); }
-
-  photoIn.addEventListener("change", function () {
-    var files = Array.prototype.slice.call(photoIn.files || []);
-    if (!files.length) return;
-    if (photos.length + files.length > MAXPHOTOS) {
-      alert("Up to " + MAXPHOTOS + " photos. You have " + photos.length + ".");
-      return;
-    }
-    var pending = files.length;
-    files.forEach(function (f) {
-      if (!/^image\//.test(f.type)) { if (!--pending) done(); return; }
-      shrink(f, function (data) {
-        if (data) {
-          photos.push({ id: "ph-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
-                        name: f.name || "photo", data: data, at: new Date().toISOString() });
-        }
-        if (!--pending) done();
-      });
-    });
-    function done() { savePhotos(); renderPhotos(); updatePhotoCount(); }
-  });
-
-  function renderPhotos() {
-    var box = document.getElementById("phList");
-    box.innerHTML = "";
-    if (!photos.length) {
-      box.innerHTML = '<p class="phnone">No photos yet. Add a picture of a bill or a list from another shop — it gets attached to the end of your printed PDF.</p>';
-      return;
-    }
-    photos.forEach(function (ph, i) {
-      var d = document.createElement("div");
-      d.className = "phitem";
-      var im = document.createElement("img");
-      im.src = ph.data; im.alt = ph.name;
-      var rm = document.createElement("button");
-      rm.className = "phdel"; rm.textContent = "✕";
-      rm.setAttribute("aria-label", "remove photo");
-      rm.addEventListener("click", function () {
-        if (!confirm("Remove this photo?")) return;
-        photos.splice(i, 1); savePhotos(); renderPhotos(); updatePhotoCount();
-      });
-      d.appendChild(im); d.appendChild(rm);
-      box.appendChild(d);
-    });
-  }
-
-  function updatePhotoCount() {
-    document.getElementById("mPhotos").querySelector("span").firstChild.nodeValue =
-      "Photos / extra bills (" + photos.length + ")";
-  }
-
-  // ---- print -------------------------------------------------------------
-  var pr = loadOpts();
-
-  document.getElementById("mPrint").addEventListener("click", function () {
-    openSheet(false); syncOptUI(); openPr(true);
-  });
-  document.getElementById("prClose").addEventListener("click", function () { openPr(false); });
-  document.getElementById("prBg").addEventListener("click", function () { openPr(false); });
-  function openPr(v) { document.getElementById("prsheet").classList.toggle("open", v); }
-
-  var OPTS = ["bought", "remaining", "oldP", "newP", "diff", "pics"];
-  function syncOptUI() {
-    OPTS.forEach(function (k) {
-      var el = document.getElementById("o_" + k);
-      el.checked = !!pr[k];
-    });
-    document.getElementById("o_pics").disabled = !photos.length;
-    document.getElementById("picsHint").textContent =
-      photos.length ? "(" + photos.length + " attached)" : "(none added)";
-    gateDiff();
-  }
-  function gateDiff() {
-    var can = pr.oldP && pr.newP;
-    var d = document.getElementById("o_diff");
-    d.disabled = !can;
-    if (!can) { d.checked = false; pr.diff = false; }
-  }
-  OPTS.forEach(function (k) {
+  ["todo", "done", "price"].forEach(function (k) {
     document.getElementById("o_" + k).addEventListener("change", function (e) {
       pr[k] = e.target.checked;
-      if (k === "oldP" || k === "newP") gateDiff();
-      saveOpts(pr);
+      try { localStorage.setItem("ration-print", JSON.stringify(pr)); } catch (x) {}
     });
   });
 
   document.getElementById("prGo").addEventListener("click", function () {
-    if (!pr.bought && !pr.remaining && !(pr.pics && photos.length)) {
-      alert("Pick at least one section to print.");
-      return;
-    }
-    buildPrint(pr); openPr(false);
+    if (!pr.todo && !pr.done) { alert("Pick at least one section."); return; }
+    buildPrint(); sheet("prsheet", false);
     setTimeout(function () { window.print(); }, 150);
   });
 
-  function buildPrint(o) {
-    var t = totals();
-    var bought = [], left = [];
-    model.forEach(function (g) {
-      live(g).forEach(function (i) { (state.done[i.id] ? bought : left).push({ g: g, i: i }); });
-    });
-
-    var h = [];
-    h.push('<h1>DMart Shopping List</h1>');
-    h.push('<p class="pmeta">' + new Date().toLocaleString("en-IN") +
-           '  ·  Bought ' + t.done + '/' + t.total + '  ·  Left ' + (t.total - t.done) + '</p>');
-
-    if (o.bought && o.newP) {
-      h.push('<table class="psum"><tr><td><b>Total paid</b><br>₹' + fmt(t.spent) + '</td>');
-      if (o.oldP) {
-        h.push('<td><b>Old estimate</b><br>₹' + fmt(t.oldSum) + '</td>');
-        h.push('<td><b>Difference</b><br>' + (t.diff >= 0 ? "+" : "−") + '₹' + fmt(Math.abs(t.diff)) + '</td>');
-      }
-      h.push('</tr></table>');
-    }
-
-    var first = true;
-    if (o.bought) {
-      h.push('<h2>Bought — ' + bought.length + ' items</h2>');
-      h.push(table(bought, { oldP: o.oldP, newP: o.newP, diff: o.diff, box: false,
-                             took: true, hideRates: !o.oldP && !o.newP }));
-      first = false;
-    }
-    if (o.remaining) {
-      h.push('<h2' + (first ? '' : ' class="brk"') + '>Still to buy — ' + left.length + ' items</h2>');
-      h.push(table(left, { oldP: false, newP: false, diff: false, box: true,
-                           took: false, hideRates: !o.oldP }));
-      first = false;
-    }
-    if (o.pics && photos.length) {
-      h.push('<h2' + (first ? '' : ' class="brk"') + '>Attached photos — ' + photos.length + '</h2>');
-      photos.forEach(function (ph, n) {
-        h.push('<div class="pphoto"><img src="' + ph.data + '" alt="">' +
-               '<div class="pcap">Photo ' + (n + 1) + '</div></div>');
+  function buildPrint() {
+    var todo = [], done = [];
+    groupsOf(cur).forEach(function (g) {
+      liveItems(g).forEach(function (i) {
+        (state.done[i.id] ? done : todo).push({ g: g, i: i });
       });
+    });
+    var h = ['<h1>' + esc(cur.title) + '</h1>',
+             '<p class="sub">' + new Date().toLocaleDateString("en-IN") + '</p>'];
+    var first = true;
+    if (pr.todo) {
+      h.push('<h2>बाकी · Still to buy — ' + todo.length + '</h2>');
+      h.push(tbl(todo, false, true)); first = false;
     }
-
+    if (pr.done) {
+      h.push('<h2' + (first ? '' : ' class="brk"') + '>लिया हुआ · Bought — ' + done.length + '</h2>');
+      h.push(tbl(done, pr.price, false)); first = false;
+    }
     document.getElementById("print").innerHTML = h.join("");
   }
 
-  // "2 किलो (रेट ₹132)" -> "2 किलो"   but "₹100 का" (the qty itself) is kept
-  function stripRate(q) {
-    return String(q)
-      .replace(/,?\s*रेट\s*₹[\d.,]+/g, "")
-      .replace(/\(\s*\)/g, "")
-      .replace(/\s{2,}/g, " ")
-      .trim();
-  }
-
-  function table(rows, o) {
-    if (!rows.length) return '<p class="pnone">— none —</p>';
-    var h = ['<table class="ptab"><thead><tr><th>#</th><th>Item</th><th>Page</th><th>Qty</th>'];
-    if (o.oldP) h.push('<th class="r">Old</th>');
-    if (o.newP) h.push('<th class="r">Paid</th>');
-    if (o.diff) h.push('<th class="r">Diff</th>');
-    if (o.box)  h.push('<th>✓</th>');
+  function tbl(rows, withPrice, box) {
+    if (!rows.length) return '<p>—</p>';
+    var h = ['<table><thead><tr><th>#</th><th>Item</th><th>Qty</th>'];
+    if (withPrice) h.push('<th class="r">₹</th>');
+    if (box) h.push('<th class="box">✓</th>');
     h.push('</tr></thead><tbody>');
-
-    function qtyFor(i, o) {
-      var q = o.took ? (tookQty(i) || i.qty) : i.qty;
-      return o.hideRates ? stripRate(q || "") : q;
-    }
-
+    var sum = 0;
     rows.forEach(function (r, n) {
-      var i = r.i, np = newPrice(i);
+      var i = r.i, p = priceOf(i);
+      if (p) sum += p;
       h.push('<tr><td>' + (n + 1) + '</td><td><b>' + esc(nameOf(i)) + '</b>' +
-             (i.en ? '<br><span class="pen">' + esc(i.en) + '</span>' : '') + '</td>' +
-             '<td>' + esc(r.g.title) + '</td>' +
-             '<td>' + esc(qtyFor(i, o) || "—") + '</td>');
-      if (o.oldP) h.push('<td class="r">' + (i.est != null ? "₹" + fmt(i.est) : "—") + '</td>');
-      if (o.newP) h.push('<td class="r"><b>' + (np != null ? "₹" + fmt(np) : "—") + '</b></td>');
-      if (o.diff) {
-        var d = (np != null && i.est != null) ? np - i.est : null;
-        h.push('<td class="r">' + (d == null ? "—" : (d > 0 ? "+" : d < 0 ? "−" : "") + "₹" + fmt(Math.abs(d))) + '</td>');
-      }
-      if (o.box) h.push('<td class="box"></td>');
+        (i.en ? '<br><span class="en2">' + esc(i.en) + '</span>' : '') + '</td>' +
+        '<td>' + esc(qtyOf(i) || i.qty || "—") + '</td>');
+      if (withPrice) h.push('<td class="r">' + (p != null ? "₹" + fmt(p) : "—") + '</td>');
+      if (box) h.push('<td class="box"></td>');
       h.push('</tr>');
     });
-
-    if (o.newP) {
-      var sum = rows.reduce(function (a, r) { var v = newPrice(r.i); return a + (v || 0); }, 0);
-      var span = 4 + (o.oldP ? 1 : 0);
-      h.push('<tr class="ptot"><td colspan="' + span + '" class="r"><b>Total</b></td>' +
-             '<td class="r"><b>₹' + fmt(sum) + '</b></td>' + (o.diff ? '<td></td>' : '') + '</tr>');
+    if (withPrice) {
+      h.push('<tr class="tot2"><td colspan="3" class="r">Total</td><td class="r">₹' + fmt(sum) + '</td></tr>');
     }
     return h.join("") + '</tbody></table>';
   }
 
   function esc(s) {
     return String(s).replace(/[&<>"]/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c];
     });
   }
 
-  updatePhotoCount();
-
-  // ---- reset (guarded) ---------------------------------------------------
-  document.getElementById("mReset").addEventListener("click", function () {
-    openSheet(false);
-    if (!confirm("⚠️ All ticks, prices and quantities will be erased.\n\nTake a backup first: Menu -> Export!\n\nContinue?")) return;
-    if (prompt('Are you sure? Type DELETE below:') !== "DELETE") { alert("Stopped — nothing was erased."); return; }
-    try { localStorage.setItem(BKEY, JSON.stringify(state)); } catch (e) {}
-    state.done = {}; state.price = {}; state.qty = {};
-    save(); render();
+  // ---- copy / export / import ------------------------------------------
+  document.getElementById("mCopy").addEventListener("click", function () {
+    var out = [cur.title, ""];
+    groupsOf(cur).forEach(function (g) {
+      var lv = liveItems(g); if (!lv.length) return;
+      out.push("— " + g.title + " —");
+      lv.forEach(function (i) {
+        var p = priceOf(i);
+        out.push((state.done[i.id] ? "[x] " : "[ ] ") + nameOf(i) +
+          (qtyOf(i) || i.qty ? " — " + (qtyOf(i) || i.qty) : "") +
+          (p != null ? "  ₹" + p : ""));
+      });
+      out.push("");
+    });
+    var t = totals(cur);
+    out.push("Total ₹" + fmt(t.spent) + "  ·  " + t.done + "/" + t.total);
+    var txt = out.join("\n");
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(
+      function () { alert("📋 Copied"); }, function () { prompt("Copy:", txt); });
+    else prompt("Copy:", txt);
+    sheet("sheet", false);
   });
 
-  render();
+  document.getElementById("mExport").addEventListener("click", function () {
+    var txt = JSON.stringify({ app: "ration", version: 1,
+      exportedAt: new Date().toISOString(), data: state }, null, 2);
+    try {
+      var url = URL.createObjectURL(new Blob([txt], { type: "application/json" }));
+      var a = document.createElement("a");
+      a.href = url; a.download = "ration-backup.json";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+    } catch (e) { prompt("Backup:", txt); }
+    sheet("sheet", false);
+  });
+
+  var fin = document.getElementById("file");
+  document.getElementById("mImport").addEventListener("click", function () {
+    sheet("sheet", false); fin.value = ""; fin.click();
+  });
+  fin.addEventListener("change", function () {
+    var f = fin.files && fin.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      var p; try { p = JSON.parse(String(r.result)); }
+      catch (e) { alert("❌ Bad file"); return; }
+      var d = sane(p && p.data ? p.data : p);
+      if (!confirm("Merge this backup into your data?")) return;
+      ["done","price","qty","name","removed","seeded"].forEach(function (k) {
+        Object.keys(d[k]).forEach(function (id) { state[k][id] = d[k][id]; });
+      });
+      var have = {}; state.extra.forEach(function (e) { have[e.id] = 1; });
+      d.extra.forEach(function (e) { if (!have[e.id]) state.extra.push(e); });
+      save(); render(); alert("✅ Imported");
+    };
+    r.readAsText(f);
+  });
+
+  // ---- shared sync ------------------------------------------------------
+  var pill = document.getElementById("syncPill");
+  var online = false;
+
+  function setPill(txt, cls) {
+    pill.textContent = txt;
+    pill.className = "pill" + (cls ? " " + cls : "");
+  }
+
+  function merge(remote) {
+    // whole-document last-write-wins; the newer updatedAt wins
+    if (!remote || typeof remote !== "object") return false;
+    if ((Number(remote.updatedAt) || 0) <= (state.updatedAt || 0)) return false;
+    var r = sane(remote);
+    r.updatedAt = Number(remote.updatedAt) || Date.now();
+    state = r; persist();
+    return true;
+  }
+
+  function pull() {
+    fetch(API, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    }).then(function (j) {
+      online = true;
+      setPill("सब डिवाइस पर सेव · synced", "on");
+      if (merge(j && j.data)) { if (cur) render(); else showMonths(); }
+    }).catch(function () {
+      online = false;
+      setPill("सिर्फ़ इस फ़ोन में · this device only", "off");
+    });
+  }
+
+  function pushUp() {
+    fetch(API, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: state })
+    }).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      online = true; setPill("सब डिवाइस पर सेव · synced", "on");
+    }).catch(function () {
+      online = false; setPill("सिर्फ़ इस फ़ोन में · this device only", "off");
+    });
+  }
+
+  pull();
+  setInterval(function () {
+    if (!document.hidden) pull();
+  }, 15000);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) pull();
+  });
+
+  // ---- boot -------------------------------------------------------------
+  var h0 = location.hash.replace("#", "");
+  if (h0 && months.some(function (m) { return m.id === h0; })) openMonth(h0);
+  else showMonths();
 })();
