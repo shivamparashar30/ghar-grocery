@@ -64,19 +64,53 @@
 </footer>
 
 <input type="file" id="file" accept="application/json,.json" hidden>
+<input type="file" id="photo" accept="image/*" multiple hidden>
 
 <div id="sheet" class="sheet">
   <div class="sheet-bg" id="sheetBg"></div>
   <div class="sheet-panel" role="dialog" aria-label="menu">
     <div class="sheet-grab"></div>
     <button class="mi" id="mAdd">➕ <span>Add new item</span></button>
-    <button class="mi" id="mPrint">🖨️ <span>Print / PDF<small>Bought and remaining, separate pages</small></span></button>
+    <button class="mi" id="mPrint">🖨️ <span>Print / PDF<small>Choose what to include</small></span></button>
+    <button class="mi" id="mPhotos">📷 <span>Photos / extra bills (0)<small>Attach to the printed PDF</small></span></button>
     <button class="mi" id="mExport">⬇️ <span>Export (backup)<small>All your data as a .json file</small></span></button>
     <button class="mi" id="mImport">⬆️ <span>Import<small>Restore data from a backup file</small></span></button>
     <button class="mi" id="mCopy">📋 <span>Copy as text</span></button>
     <button class="mi" id="mRestore">♻️ <span>Restore deleted (0)</span></button>
     <button class="mi danger" id="mReset">⚠️ <span>Erase everything (reset)</span></button>
     <button class="mi close" id="mClose">Close</button>
+  </div>
+</div>
+
+<!-- print options -->
+<div id="prsheet" class="sheet">
+  <div class="sheet-bg" id="prBg"></div>
+  <div class="sheet-panel" role="dialog" aria-label="print options">
+    <div class="sheet-grab"></div>
+    <h3 class="sh">What to print</h3>
+    <label class="opt"><input type="checkbox" id="o_bought"><span>Receipt — items I bought<small>What you picked up, with quantity</small></span></label>
+    <label class="opt"><input type="checkbox" id="o_remaining"><span>Shopping list — still to buy<small>No prices, with tick boxes</small></span></label>
+    <label class="opt"><input type="checkbox" id="o_pics"><span>Attached photos <em id="picsHint"></em><small>Bills / lists from other shops</small></span></label>
+
+    <h3 class="sh">Prices on the receipt</h3>
+    <label class="opt"><input type="checkbox" id="o_newP"><span>Price I paid<small>The new price you entered</small></span></label>
+    <label class="opt"><input type="checkbox" id="o_oldP"><span>Old list price<small>The estimate from the handwritten list</small></span></label>
+    <label class="opt"><input type="checkbox" id="o_diff"><span>Difference<small>Needs both prices on</small></span></label>
+
+    <button class="btn wide" id="prGo">🖨️ Print / Save as PDF</button>
+    <button class="mi close" id="prClose">Close</button>
+  </div>
+</div>
+
+<!-- photos -->
+<div id="phsheet" class="sheet">
+  <div class="sheet-bg" id="phBg"></div>
+  <div class="sheet-panel" role="dialog" aria-label="photos">
+    <div class="sheet-grab"></div>
+    <h3 class="sh">Photos / extra bills</h3>
+    <div id="phList" class="phgrid"></div>
+    <button class="btn wide" id="phAdd">📷 Add photo</button>
+    <button class="mi close" id="phClose">Close</button>
   </div>
 </div>
 

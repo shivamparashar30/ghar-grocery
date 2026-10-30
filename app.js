@@ -420,7 +420,8 @@
       app: "dmart-list", version: 1,
       exportedAt: new Date().toISOString(),
       itemCount: allItems().length,
-      data: state
+      data: state,
+      photos: photos
     };
     var txt = JSON.stringify(payload, null, 2);
     if (!download("dmart-list-backup_" + stamp() + ".json", txt)) {
@@ -473,6 +474,14 @@
           if (e && e.id && typeof e.hi === "string" && !have[e.id]) state.extra.push(e);
         });
       }
+      if (Array.isArray(p.photos) && p.photos.length) {
+        var seen = {};
+        photos.forEach(function (x) { seen[x.id] = 1; });
+        p.photos.forEach(function (x) {
+          if (x && x.id && x.data && !seen[x.id] && photos.length < MAXPHOTOS) photos.push(x);
+        });
+        savePhotos(); updatePhotoCount();
+      }
       save(); syncExtra(); render();
       alert("✅ Import done.");
     };
@@ -513,19 +522,168 @@
     return lines.join("\n");
   }
 
-  // ---- print -------------------------------------------------------------
-  document.getElementById("mPrint").addEventListener("click", function () {
-    buildPrint(); openSheet(false);
-    setTimeout(function () { window.print(); }, 120);
+  // ---- photos (separate storage key: a photo failure must never
+  //      corrupt the shopping data under KEY) ------------------------------
+  var PKEY = "dmart-list-v1-photos";
+  var OKEY = "dmart-list-v1-printopts";
+  var MAXPHOTOS = 12;
+
+  function loadPhotos() {
+    try {
+      var r = localStorage.getItem(PKEY);
+      var a = r ? JSON.parse(r) : [];
+      return Array.isArray(a) ? a.filter(function (x) { return x && x.id && x.data; }) : [];
+    } catch (e) { return []; }
+  }
+  var photos = loadPhotos();
+
+  function savePhotos() {
+    try { localStorage.setItem(PKEY, JSON.stringify(photos)); return true; }
+    catch (e) {
+      alert("⚠️ Phone storage is full — photo not saved.\nDelete a photo and try again.\n\nYour list and prices are safe.");
+      photos = loadPhotos();
+      return false;
+    }
+  }
+
+  function loadOpts() {
+    var d = { bought: true, remaining: true, oldP: false, newP: true, diff: false, pics: true };
+    try {
+      var r = JSON.parse(localStorage.getItem(OKEY) || "{}");
+      Object.keys(d).forEach(function (k) { if (typeof r[k] === "boolean") d[k] = r[k]; });
+    } catch (e) {}
+    return d;
+  }
+  function saveOpts(o) { try { localStorage.setItem(OKEY, JSON.stringify(o)); } catch (e) {} }
+
+  // downscale so a phone photo is ~150KB instead of ~4MB
+  function shrink(file, cb) {
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function () {
+      var max = 1400, w = img.width, h = img.height;
+      var sc = Math.min(1, max / Math.max(w, h));
+      var c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(w * sc));
+      c.height = Math.max(1, Math.round(h * sc));
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      try { cb(c.toDataURL("image/jpeg", 0.72)); } catch (e) { cb(null); }
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); cb(null); };
+    img.src = url;
+  }
+
+  var photoIn = document.getElementById("photo");
+  document.getElementById("mPhotos").addEventListener("click", function () {
+    openSheet(false); renderPhotos(); openPh(true);
+  });
+  document.getElementById("phAdd").addEventListener("click", function () {
+    photoIn.value = ""; photoIn.click();
+  });
+  document.getElementById("phClose").addEventListener("click", function () { openPh(false); });
+  document.getElementById("phBg").addEventListener("click", function () { openPh(false); });
+
+  function openPh(v) { document.getElementById("phsheet").classList.toggle("open", v); }
+
+  photoIn.addEventListener("change", function () {
+    var files = Array.prototype.slice.call(photoIn.files || []);
+    if (!files.length) return;
+    if (photos.length + files.length > MAXPHOTOS) {
+      alert("Up to " + MAXPHOTOS + " photos. You have " + photos.length + ".");
+      return;
+    }
+    var pending = files.length;
+    files.forEach(function (f) {
+      if (!/^image\//.test(f.type)) { if (!--pending) done(); return; }
+      shrink(f, function (data) {
+        if (data) {
+          photos.push({ id: "ph-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+                        name: f.name || "photo", data: data, at: new Date().toISOString() });
+        }
+        if (!--pending) done();
+      });
+    });
+    function done() { savePhotos(); renderPhotos(); updatePhotoCount(); }
   });
 
-  function buildPrint() {
-    var t = totals();
-    var done = [], left = [];
-    model.forEach(function (g) {
-      live(g).forEach(function (i) {
-        (state.done[i.id] ? done : left).push({ g: g, i: i });
+  function renderPhotos() {
+    var box = document.getElementById("phList");
+    box.innerHTML = "";
+    if (!photos.length) {
+      box.innerHTML = '<p class="phnone">No photos yet. Add a picture of a bill or a list from another shop — it gets attached to the end of your printed PDF.</p>';
+      return;
+    }
+    photos.forEach(function (ph, i) {
+      var d = document.createElement("div");
+      d.className = "phitem";
+      var im = document.createElement("img");
+      im.src = ph.data; im.alt = ph.name;
+      var rm = document.createElement("button");
+      rm.className = "phdel"; rm.textContent = "✕";
+      rm.setAttribute("aria-label", "remove photo");
+      rm.addEventListener("click", function () {
+        if (!confirm("Remove this photo?")) return;
+        photos.splice(i, 1); savePhotos(); renderPhotos(); updatePhotoCount();
       });
+      d.appendChild(im); d.appendChild(rm);
+      box.appendChild(d);
+    });
+  }
+
+  function updatePhotoCount() {
+    document.getElementById("mPhotos").querySelector("span").firstChild.nodeValue =
+      "Photos / extra bills (" + photos.length + ")";
+  }
+
+  // ---- print -------------------------------------------------------------
+  var pr = loadOpts();
+
+  document.getElementById("mPrint").addEventListener("click", function () {
+    openSheet(false); syncOptUI(); openPr(true);
+  });
+  document.getElementById("prClose").addEventListener("click", function () { openPr(false); });
+  document.getElementById("prBg").addEventListener("click", function () { openPr(false); });
+  function openPr(v) { document.getElementById("prsheet").classList.toggle("open", v); }
+
+  var OPTS = ["bought", "remaining", "oldP", "newP", "diff", "pics"];
+  function syncOptUI() {
+    OPTS.forEach(function (k) {
+      var el = document.getElementById("o_" + k);
+      el.checked = !!pr[k];
+    });
+    document.getElementById("o_pics").disabled = !photos.length;
+    document.getElementById("picsHint").textContent =
+      photos.length ? "(" + photos.length + " attached)" : "(none added)";
+    gateDiff();
+  }
+  function gateDiff() {
+    var can = pr.oldP && pr.newP;
+    var d = document.getElementById("o_diff");
+    d.disabled = !can;
+    if (!can) { d.checked = false; pr.diff = false; }
+  }
+  OPTS.forEach(function (k) {
+    document.getElementById("o_" + k).addEventListener("change", function (e) {
+      pr[k] = e.target.checked;
+      if (k === "oldP" || k === "newP") gateDiff();
+      saveOpts(pr);
+    });
+  });
+
+  document.getElementById("prGo").addEventListener("click", function () {
+    if (!pr.bought && !pr.remaining && !(pr.pics && photos.length)) {
+      alert("Pick at least one section to print.");
+      return;
+    }
+    buildPrint(pr); openPr(false);
+    setTimeout(function () { window.print(); }, 150);
+  });
+
+  function buildPrint(o) {
+    var t = totals();
+    var bought = [], left = [];
+    model.forEach(function (g) {
+      live(g).forEach(function (i) { (state.done[i.id] ? bought : left).push({ g: g, i: i }); });
     });
 
     var h = [];
@@ -533,43 +691,84 @@
     h.push('<p class="pmeta">' + new Date().toLocaleString("en-IN") +
            '  ·  Bought ' + t.done + '/' + t.total + '  ·  Left ' + (t.total - t.done) + '</p>');
 
-    h.push('<table class="psum"><tr>' +
-           '<td><b>New total spent</b><br>₹' + fmt(t.spent) + '</td>' +
-           '<td><b>Old estimate</b><br>₹' + fmt(t.oldSum) + '</td>' +
-           '<td><b>Difference</b><br>' + (t.diff >= 0 ? "+" : "−") + '₹' + fmt(Math.abs(t.diff)) + '</td>' +
-           '</tr></table>');
+    if (o.bought && o.newP) {
+      h.push('<table class="psum"><tr><td><b>Total paid</b><br>₹' + fmt(t.spent) + '</td>');
+      if (o.oldP) {
+        h.push('<td><b>Old estimate</b><br>₹' + fmt(t.oldSum) + '</td>');
+        h.push('<td><b>Difference</b><br>' + (t.diff >= 0 ? "+" : "−") + '₹' + fmt(Math.abs(t.diff)) + '</td>');
+      }
+      h.push('</tr></table>');
+    }
 
-    h.push('<h2>✓ Bought — ' + done.length + ' items</h2>');
-    h.push(table(done, true));
-
-    h.push('<h2 class="brk">☐ Remaining — ' + left.length + ' items</h2>');
-    h.push(table(left, false));
+    var first = true;
+    if (o.bought) {
+      h.push('<h2>Bought — ' + bought.length + ' items</h2>');
+      h.push(table(bought, { oldP: o.oldP, newP: o.newP, diff: o.diff, box: false,
+                             took: true, hideRates: !o.oldP && !o.newP }));
+      first = false;
+    }
+    if (o.remaining) {
+      h.push('<h2' + (first ? '' : ' class="brk"') + '>Still to buy — ' + left.length + ' items</h2>');
+      h.push(table(left, { oldP: false, newP: false, diff: false, box: true,
+                           took: false, hideRates: !o.oldP }));
+      first = false;
+    }
+    if (o.pics && photos.length) {
+      h.push('<h2' + (first ? '' : ' class="brk"') + '>Attached photos — ' + photos.length + '</h2>');
+      photos.forEach(function (ph, n) {
+        h.push('<div class="pphoto"><img src="' + ph.data + '" alt="">' +
+               '<div class="pcap">Photo ' + (n + 1) + '</div></div>');
+      });
+    }
 
     document.getElementById("print").innerHTML = h.join("");
   }
 
-  function table(rows, withPrice) {
+  // "2 किलो (रेट ₹132)" -> "2 किलो"   but "₹100 का" (the qty itself) is kept
+  function stripRate(q) {
+    return String(q)
+      .replace(/,?\s*रेट\s*₹[\d.,]+/g, "")
+      .replace(/\(\s*\)/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+  function table(rows, o) {
     if (!rows.length) return '<p class="pnone">— none —</p>';
     var h = ['<table class="ptab"><thead><tr><th>#</th><th>Item</th><th>Page</th><th>Qty</th>'];
-    h.push(withPrice ? '<th class="r">Old</th><th class="r">New</th><th class="r">Diff</th>'
-                     : '<th class="r">Old price</th><th>✓</th>');
+    if (o.oldP) h.push('<th class="r">Old</th>');
+    if (o.newP) h.push('<th class="r">Paid</th>');
+    if (o.diff) h.push('<th class="r">Diff</th>');
+    if (o.box)  h.push('<th>✓</th>');
     h.push('</tr></thead><tbody>');
+
+    function qtyFor(i, o) {
+      var q = o.took ? (tookQty(i) || i.qty) : i.qty;
+      return o.hideRates ? stripRate(q || "") : q;
+    }
+
     rows.forEach(function (r, n) {
       var i = r.i, np = newPrice(i);
       h.push('<tr><td>' + (n + 1) + '</td><td><b>' + esc(nameOf(i)) + '</b>' +
              (i.en ? '<br><span class="pen">' + esc(i.en) + '</span>' : '') + '</td>' +
              '<td>' + esc(r.g.title) + '</td>' +
-             '<td>' + esc(withPrice ? (tookQty(i) || i.qty || "—") : (i.qty || "—")) + '</td>');
-      if (withPrice) {
+             '<td>' + esc(qtyFor(i, o) || "—") + '</td>');
+      if (o.oldP) h.push('<td class="r">' + (i.est != null ? "₹" + fmt(i.est) : "—") + '</td>');
+      if (o.newP) h.push('<td class="r"><b>' + (np != null ? "₹" + fmt(np) : "—") + '</b></td>');
+      if (o.diff) {
         var d = (np != null && i.est != null) ? np - i.est : null;
-        h.push('<td class="r">' + (i.est != null ? "₹" + fmt(i.est) : "—") + '</td>' +
-               '<td class="r"><b>' + (np != null ? "₹" + fmt(np) : "—") + '</b></td>' +
-               '<td class="r">' + (d == null ? "—" : (d > 0 ? "+" : d < 0 ? "−" : "") + "₹" + fmt(Math.abs(d))) + '</td>');
-      } else {
-        h.push('<td class="r">' + (i.est != null ? "₹" + fmt(i.est) : "—") + '</td><td class="box"></td>');
+        h.push('<td class="r">' + (d == null ? "—" : (d > 0 ? "+" : d < 0 ? "−" : "") + "₹" + fmt(Math.abs(d))) + '</td>');
       }
+      if (o.box) h.push('<td class="box"></td>');
       h.push('</tr>');
     });
+
+    if (o.newP) {
+      var sum = rows.reduce(function (a, r) { var v = newPrice(r.i); return a + (v || 0); }, 0);
+      var span = 4 + (o.oldP ? 1 : 0);
+      h.push('<tr class="ptot"><td colspan="' + span + '" class="r"><b>Total</b></td>' +
+             '<td class="r"><b>₹' + fmt(sum) + '</b></td>' + (o.diff ? '<td></td>' : '') + '</tr>');
+    }
     return h.join("") + '</tbody></table>';
   }
 
@@ -578,6 +777,8 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
     });
   }
+
+  updatePhotoCount();
 
   // ---- reset (guarded) ---------------------------------------------------
   document.getElementById("mReset").addEventListener("click", function () {

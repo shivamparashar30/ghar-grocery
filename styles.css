@@ -209,3 +209,34 @@ footer{
   .ptab tr{page-break-inside:avoid}
   thead{display:table-header-group}
 }
+
+/* ---------- option rows / photo grid ---------- */
+.sh{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);
+    margin:12px 2px 7px;font-weight:700}
+.sh:first-of-type{margin-top:4px}
+
+.opt{display:flex;align-items:flex-start;gap:11px;width:100%;
+  background:var(--card2);border:1px solid var(--line);border-radius:12px;
+  padding:12px 13px;margin-bottom:7px;cursor:pointer}
+.opt input{width:21px;height:21px;flex:0 0 auto;accent-color:var(--accent);margin:1px 0 0}
+.opt span{display:flex;flex-direction:column;gap:2px;font-size:15px;min-width:0}
+.opt small{font-size:11px;color:var(--muted)}
+.opt em{font-style:normal;color:var(--accent2);font-size:11.5px}
+.opt:has(input:disabled){opacity:.45}
+
+.btn.wide{width:100%;margin:12px 0 8px;padding:14px;font-size:15.5px}
+
+.phgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-bottom:10px}
+.phitem{position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--line);aspect-ratio:3/4}
+.phitem img{width:100%;height:100%;object-fit:cover;display:block}
+.phdel{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;
+  border:0;background:rgba(0,0,0,.72);color:#fff;font-size:13px;cursor:pointer;line-height:1}
+.phnone{color:var(--muted);font-size:13px;line-height:1.6;margin:0 2px 10px}
+
+/* ---------- print: photos + totals row ---------- */
+@media print{
+  .ptab .ptot td{border-top:1.2pt solid #000;background:#f3f3f3}
+  .pphoto{page-break-inside:avoid;margin:0 0 5mm;text-align:center}
+  .pphoto img{max-width:100%;max-height:200mm;border:.5pt solid #999}
+  .pcap{font-size:8.5pt;color:#555;margin-top:1mm}
+}
