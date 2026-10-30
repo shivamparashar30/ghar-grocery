@@ -421,7 +421,7 @@
     document.getElementById("o_price").checked = pr.price;
     sheet("sheet", false); sheet("prsheet", true);
   }
-  document.getElementById("print").addEventListener("click", openPrint);
+  document.getElementById("printBtn").addEventListener("click", openPrint);
   document.getElementById("mPrint").addEventListener("click", openPrint);
 
   ["todo", "done", "price"].forEach(function (k) {
@@ -455,7 +455,7 @@
       h.push('<h2' + (first ? '' : ' class="brk"') + '>लिया हुआ · Bought — ' + done.length + '</h2>');
       h.push(tbl(done, pr.price, false)); first = false;
     }
-    document.getElementById("print").innerHTML = h.join("");
+    document.getElementById("printArea").innerHTML = h.join("");
   }
 
   function tbl(rows, withPrice, box) {

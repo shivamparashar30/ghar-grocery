@@ -181,15 +181,15 @@ li.row.done .en{text-decoration:line-through;color:#9AA4B2}
 }
 
 /* ---------- print ---------- */
-#print{display:none}
+#printArea{display:none}
 @media print{
   #monthView,#listView,.sheet{display:none !important}
   body{background:#fff;font-size:11pt}
-  #print{display:block;padding:0}
-  #print h1{font-size:16pt;margin:0 0 1mm;font-weight:700}
-  #print .sub{font-size:9pt;color:#555;margin:0 0 5mm}
-  #print h2{font-size:12pt;margin:6mm 0 2mm;padding-bottom:1mm;border-bottom:1.2pt solid #000}
-  #print h2.brk{page-break-before:always}
+  #printArea{display:block;padding:0}
+  #printArea h1{font-size:16pt;margin:0 0 1mm;font-weight:700}
+  #printArea .sub{font-size:9pt;color:#555;margin:0 0 5mm}
+  #printArea h2{font-size:12pt;margin:6mm 0 2mm;padding-bottom:1mm;border-bottom:1.2pt solid #000}
+  #printArea h2.brk{page-break-before:always}
   table{width:100%;border-collapse:collapse;font-size:10pt}
   th,td{border:.5pt solid #888;padding:1.7mm 2.2mm;text-align:left;vertical-align:top}
   thead th{background:#F0F0F0;font-size:9pt}
